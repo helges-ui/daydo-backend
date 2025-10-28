@@ -127,7 +127,7 @@ A Django REST API backend for the DayDo family task management application.
 ### Parent Permissions
 - Full access to family management
 - Can create, edit, delete child profiles
-- Can assign tasks to children
+- Can assign tasks to children (kids)
 - Can monitor child progress
 - Can invite other parents
 
