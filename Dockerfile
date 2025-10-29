@@ -14,6 +14,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
+# Ensure log directory exists and configure default log file location inside the container
+ENV LOG_FILE=/var/log/daydo/django.log
+RUN mkdir -p /var/log/daydo
+
 # Collect static files (if any)
 RUN python manage.py collectstatic --noinput --clear
 
