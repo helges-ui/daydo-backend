@@ -9,7 +9,7 @@ from rest_framework_simplejwt.views import TokenRefreshView
 
 from .views import (
     AuthenticationViewSet, FamilyViewSet, ChildProfileViewSet,
-    ChildUserPermissionsViewSet, UserViewSet, DashboardView
+    ChildUserPermissionsViewSet, UserViewSet, DashboardView, HealthCheckView
 )
 
 # Create router for ViewSets
@@ -28,6 +28,8 @@ urlpatterns = [
     
     # Dashboard endpoint
     path('dashboard/', DashboardView.as_view(), name='dashboard'),
+    # Health check endpoint
+    path('health/', HealthCheckView.as_view(), name='health'),
     
     # Include router URLs
     path('', include(router.urls)),

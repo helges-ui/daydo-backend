@@ -13,6 +13,7 @@ from django.contrib.auth import authenticate
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.utils import timezone
 from datetime import timedelta
+from django.http import JsonResponse
 
 from .models import User, Family, ChildProfile, ChildUserPermissions
 from .serializers import (
@@ -320,3 +321,13 @@ class DashboardView(APIView):
             'timestamp': timezone.now().isoformat(),
             'children': children_progress
         })
+
+
+class HealthCheckView(APIView):
+    """Simple health check endpoint returning 200 OK for load balancer checks"""
+
+    authentication_classes = []
+    permission_classes = []
+
+    def get(self, request):
+        return JsonResponse({'status': 'ok'}, status=200)
