@@ -44,7 +44,7 @@ class UserSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'username', 'email', 'first_name', 'last_name', 
             'role', 'role_display', 'family', 'family_name', 
-            'phone_number', 'avatar', 'is_active', 'display_name',
+            'phone_number', 'avatar', 'color', 'is_active', 'display_name',
             'created_at', 'password'
         ]
         read_only_fields = ['id', 'created_at', 'role']
@@ -85,7 +85,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         fields = [
             'username', 'email', 'first_name', 'last_name', 
             'password', 'password_confirm', 'family_name',
-            'phone_number', 'avatar'
+            'phone_number', 'avatar', 'color'
         ]
     
     def validate(self, attrs):
@@ -127,7 +127,7 @@ class ChildProfileSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'first_name', 'last_name', 'full_name', 'family',
             'is_view_only', 'linked_user', 'linked_username', 'manager', 'manager_name',
-            'avatar', 'birth_date', 'is_active', 'has_login_account',
+            'avatar', 'color', 'birth_date', 'is_active', 'has_login_account',
             'created_at'
         ]
         read_only_fields = ['id', 'created_at', 'manager']
@@ -147,7 +147,7 @@ class ChildProfileCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = ChildProfile
         fields = [
-            'first_name', 'last_name', 'avatar', 'birth_date',
+            'first_name', 'last_name', 'avatar', 'color', 'birth_date',
             'create_login_account', 'username', 'password'
         ]
     
@@ -242,7 +242,7 @@ class FamilyMembersSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             'id', 'username', 'email', 'first_name', 'last_name',
-            'role', 'role_display', 'display_name', 'avatar',
+            'role', 'role_display', 'display_name', 'avatar', 'color',
             'is_active', 'created_at', 'child_profile', 'permissions'
         ]
     

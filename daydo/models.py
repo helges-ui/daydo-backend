@@ -1,7 +1,18 @@
 import uuid
+import re
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 from django.core.validators import RegexValidator
+from django.core.exceptions import ValidationError
+
+
+def validate_hex_color(value):
+    """Validate that the value is a valid HEX color code (#RRGGBB or #RGB)"""
+    if not value:
+        return
+    hex_color_pattern = re.compile(r'^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$')
+    if not hex_color_pattern.match(value):
+        raise ValidationError('Enter a valid HEX color code (e.g., #FF5733 or #F57)')
 
 
 class Family(models.Model):
@@ -42,6 +53,12 @@ class User(AbstractUser):
         validators=[RegexValidator(regex=r'^\+?1?\d{9,15}$', message="Enter a valid phone number")]
     )
     avatar = models.CharField(max_length=20, blank=True, help_text="Icon reference")
+    color = models.CharField(
+        max_length=7, 
+        blank=True, 
+        validators=[validate_hex_color],
+        help_text="HEX color code (e.g., #FF5733)"
+    )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -109,6 +126,12 @@ class ChildProfile(models.Model):
         limit_choices_to={'role': 'PARENT'}
     )
     avatar = models.CharField(max_length=20, blank=True, help_text="Icon reference")
+    color = models.CharField(
+        max_length=7, 
+        blank=True, 
+        validators=[validate_hex_color],
+        help_text="HEX color code (e.g., #FF5733)"
+    )
     birth_date = models.DateField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
