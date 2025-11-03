@@ -16,6 +16,7 @@ from django.http import JsonResponse
 
 from .models import User, Family, ChildProfile, ChildUserPermissions
 from .services.auth_service import AuthService
+from .services.dashboard_service import DashboardService
 from .serializers import (
     FamilySerializer, UserSerializer, UserRegistrationSerializer,
     ChildProfileSerializer, ChildProfileCreateSerializer,
@@ -83,13 +84,19 @@ class FamilyViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         """Return families that the user belongs to"""
-        return Family.objects.filter(members=self.request.user)
+        # Note: select_related() without arguments doesn't work, removed empty call
+        return Family.objects.filter(members=self.request.user).prefetch_related(
+            'members', 'child_profiles'
+        )
     
     @action(detail=True, methods=['get'])
     def members(self, request, pk=None):
         """Get all family members"""
         family = self.get_object()
-        members = family.members.all()
+        # Optimize queries: select_related for foreign keys, prefetch_related for reverse relations
+        members = family.members.select_related('family').prefetch_related(
+            'childuserpermissions', 'child_profile'
+        ).all()
         serializer = FamilyMembersSerializer(members, many=True)
         return Response(serializer.data)
     
@@ -97,7 +104,10 @@ class FamilyViewSet(viewsets.ModelViewSet):
     def children(self, request, pk=None):
         """Get all child profiles in the family"""
         family = self.get_object()
-        children = family.child_profiles.all()
+        # Optimize queries: select_related for foreign keys, prefetch_related for reverse relations
+        children = family.child_profiles.select_related(
+            'family', 'manager', 'linked_user'
+        ).prefetch_related('linked_user__childuserpermissions').all()
         serializer = ChildProfileSerializer(children, many=True)
         return Response(serializer.data)
     
@@ -106,25 +116,18 @@ class FamilyViewSet(viewsets.ModelViewSet):
         """Get family dashboard data (US-7)"""
         family = self.get_object()
         
-        # Calculate dashboard metrics
-        total_members = family.members.count()
-        total_children = family.child_profiles.count()
-        children_with_accounts = family.child_profiles.filter(
-            is_view_only=False, linked_user__isnull=False
-        ).count()
-        children_view_only = family.child_profiles.filter(is_view_only=True).count()
+        # Use DashboardService with caching
+        dashboard_data = DashboardService.get_family_dashboard(
+            family_id=family.id,
+            user_id=request.user.id,
+            use_cache=True
+        )
         
-        # Recent activity (placeholder for now)
-        recent_activity = []
-        
-        dashboard_data = {
-            'family_name': family.name,
-            'total_members': total_members,
-            'total_children': total_children,
-            'children_with_accounts': children_with_accounts,
-            'children_view_only': children_view_only,
-            'recent_activity': recent_activity
-        }
+        if dashboard_data is None:
+            return Response(
+                {'error': 'Family not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
         
         serializer = DashboardSerializer(dashboard_data)
         return Response(serializer.data)
@@ -137,7 +140,12 @@ class ChildProfileViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         """Return child profiles in the user's family"""
-        return ChildProfile.objects.filter(family=self.request.user.family)
+        # Optimize queries: select_related for foreign keys, prefetch_related for reverse relations
+        return ChildProfile.objects.filter(
+            family=self.request.user.family
+        ).select_related('family', 'manager', 'linked_user').prefetch_related(
+            'linked_user__childuserpermissions'
+        )
     
     def get_serializer_class(self):
         """Return appropriate serializer based on action"""
@@ -147,10 +155,12 @@ class ChildProfileViewSet(viewsets.ModelViewSet):
     
     def perform_create(self, serializer):
         """Create child profile with current user as manager"""
-        serializer.save(
+        child_profile = serializer.save(
             family=self.request.user.family,
             manager=self.request.user
         )
+        # Invalidate dashboard cache when a child is added
+        DashboardService.invalidate_cache(self.request.user.family.id, self.request.user.id)
     
     @action(detail=True, methods=['post'])
     def create_login_account(self, request, pk=None):
@@ -174,6 +184,8 @@ class ChildProfileViewSet(viewsets.ModelViewSet):
         
         try:
             user = child_profile.create_login_account(username=username, password=password)
+            # Invalidate dashboard cache when a login account is created
+            DashboardService.invalidate_cache(request.user.family.id, request.user.id)
             return Response({
                 'message': 'Login account created successfully',
                 'user': UserSerializer(user).data
@@ -204,6 +216,9 @@ class ChildProfileViewSet(viewsets.ModelViewSet):
         # Delete the user account
         linked_user.delete()
         
+        # Invalidate dashboard cache when a login account is removed
+        DashboardService.invalidate_cache(request.user.family.id, request.user.id)
+        
         return Response({
             'message': 'Login account removed successfully'
         }, status=status.HTTP_200_OK)
@@ -216,10 +231,11 @@ class ChildUserPermissionsViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         """Return permissions for child users in the user's family"""
+        # Optimize queries: select_related for foreign keys
         return ChildUserPermissions.objects.filter(
             user__family=self.request.user.family,
             user__role='CHILD_USER'
-        )
+        ).select_related('user', 'user__family')
     
     def get_object(self):
         """Get specific permission object"""
@@ -235,7 +251,10 @@ class UserViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         """Return users in the same family"""
-        return User.objects.filter(family=self.request.user.family)
+        # Optimize queries: select_related for foreign keys, prefetch_related for reverse relations
+        return User.objects.filter(
+            family=self.request.user.family
+        ).select_related('family').prefetch_related('childuserpermissions')
     
     @action(detail=False, methods=['get'])
     def me(self, request):
@@ -282,8 +301,10 @@ class DashboardView(APIView):
         """Get dashboard data with children's progress"""
         family = request.user.family
         
-        # Get all children in the family
-        children = family.child_profiles.filter(is_active=True)
+        # Optimize queries: select_related for foreign keys, prefetch_related for reverse relations
+        children = family.child_profiles.filter(is_active=True).select_related(
+            'family', 'manager', 'linked_user'
+        ).prefetch_related('linked_user__childuserpermissions')
         
         children_progress = []
         for child in children:
