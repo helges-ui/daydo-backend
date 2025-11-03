@@ -7,7 +7,7 @@ from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.shortcuts import get_object_or_404
 from django.contrib.auth import authenticate
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -35,7 +35,7 @@ from .permissions import (
 class AuthenticationViewSet(viewsets.ViewSet):
     """Authentication endpoints for user registration and login"""
     
-    @action(detail=False, methods=['post'])
+    @action(detail=False, methods=['post'], permission_classes=[AllowAny])
     def register(self, request):
         """Register a new parent and create family (US-1)"""
         serializer = UserRegistrationSerializer(data=request.data)
@@ -57,7 +57,7 @@ class AuthenticationViewSet(viewsets.ViewSet):
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
-    @action(detail=False, methods=['post'])
+    @action(detail=False, methods=['post'], permission_classes=[AllowAny])
     def login(self, request):
         """Login user and return JWT tokens"""
         serializer = LoginSerializer(data=request.data)
