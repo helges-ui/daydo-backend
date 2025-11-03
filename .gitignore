@@ -160,6 +160,7 @@ Desktop.ini
 # Logs
 logs/
 *.log
+django.log
 
 # Temporary files
 tmp/
