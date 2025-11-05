@@ -7,7 +7,7 @@ from rest_framework import serializers
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
-from .models import User, Family, ChildProfile, ChildUserPermissions, UserRole, Role, Task, Event, EventAssignment
+from .models import User, Family, ChildProfile, ChildUserPermissions, UserRole, Role, Task, Event, EventAssignment, ShoppingList, ShoppingItem
 
 
 class FamilySerializer(serializers.ModelSerializer):
@@ -401,5 +401,50 @@ class EventSerializer(serializers.ModelSerializer):
             # Create new assignments
             for user in assigned_user_ids:
                 EventAssignment.objects.create(event=instance, user=user)
+
+            return instance
+
+
+class ShoppingItemSerializer(serializers.ModelSerializer):
+    """Serializer for ShoppingItem model"""
+    
+    class Meta:
+        model = ShoppingItem
+        fields = [
+            'id', 'shopping_list', 'name', 'checked', 'order',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'shopping_list', 'created_at', 'updated_at']
+
+    def create(self, validated_data):
+        """Create shopping item with shopping_list from request context"""
+        request = self.context.get('request')
+        shopping_list = self.context.get('shopping_list')
         
-        return instance
+        if shopping_list:
+            validated_data['shopping_list'] = shopping_list
+        
+        return super().create(validated_data)
+
+
+class ShoppingListSerializer(serializers.ModelSerializer):
+    """Serializer for ShoppingList model"""
+    items = ShoppingItemSerializer(many=True, read_only=True)
+    items_count = serializers.SerializerMethodField()
+    unchecked_items_count = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = ShoppingList
+        fields = [
+            'id', 'family', 'items', 'items_count', 'unchecked_items_count',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'family', 'created_at', 'updated_at']
+    
+    def get_items_count(self, obj):
+        """Get total number of items"""
+        return obj.items.count()
+    
+    def get_unchecked_items_count(self, obj):
+        """Get number of unchecked items"""
+        return obj.items.filter(checked=False).count()

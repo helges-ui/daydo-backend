@@ -4,6 +4,7 @@ These views implement the role-based access control and API endpoints
 defined in the product backlog.
 """
 from rest_framework import viewsets, status, permissions
+from django.db.models import Max
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -16,7 +17,7 @@ from django.http import JsonResponse
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework.exceptions import ValidationError as DRFValidationError
 
-from .models import User, Family, ChildProfile, ChildUserPermissions, Role, UserRole, Task, Event, EventAssignment
+from .models import User, Family, ChildProfile, ChildUserPermissions, Role, UserRole, Task, Event, EventAssignment, ShoppingList, ShoppingItem
 from .services.auth_service import AuthService
 from .services.dashboard_service import DashboardService
 from .serializers import (
@@ -24,7 +25,7 @@ from .serializers import (
     ChildProfileSerializer, ChildProfileCreateSerializer,
     ChildUserPermissionsSerializer, LoginSerializer,
     InviteParentSerializer, FamilyMembersSerializer, DashboardSerializer,
-    TaskSerializer, EventSerializer
+    TaskSerializer, EventSerializer, ShoppingListSerializer, ShoppingItemSerializer
 )
 from .permissions import (
     IsParentPermission, IsChildUserPermission, CanManageFamilyPermission,
@@ -620,3 +621,89 @@ class EventViewSet(viewsets.ModelViewSet):
             family=self.request.user.family,
             created_by=self.request.user
         )
+
+
+class ShoppingListViewSet(viewsets.ModelViewSet):
+    """Shopping list management endpoints"""
+    serializer_class = ShoppingListSerializer
+    permission_classes = [IsAuthenticated, FamilyMemberPermission]
+
+    def get_queryset(self):
+        """Return shopping list for the user's family"""
+        user = self.request.user
+        # Get or create shopping list for the family
+        shopping_list, _ = ShoppingList.objects.get_or_create(family=user.family)
+        return ShoppingList.objects.filter(family=user.family).prefetch_related('items')
+
+    def retrieve(self, request, *args, **kwargs):
+        """Get shopping list for the family (or create if doesn't exist)"""
+        user = request.user
+        shopping_list, created = ShoppingList.objects.get_or_create(family=user.family)
+        serializer = self.get_serializer(shopping_list)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'], url_path='current')
+    def current(self, request):
+        """Get current family's shopping list"""
+        user = request.user
+        shopping_list, created = ShoppingList.objects.get_or_create(family=user.family)
+        serializer = self.get_serializer(shopping_list)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='items')
+    def add_item(self, request, pk=None):
+        """Add item to shopping list"""
+        shopping_list = self.get_object()
+        serializer = ShoppingItemSerializer(
+            data=request.data,
+            context={'request': request, 'shopping_list': shopping_list}
+        )
+        if serializer.is_valid():
+            # Set order based on current max order + 1
+            max_order = shopping_list.items.aggregate(
+                max_order=Max('order')
+            )['max_order'] or 0
+            serializer.save(order=max_order + 1)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['patch'], url_path='items/(?P<item_id>[^/.]+)')
+    def update_item(self, request, pk=None, item_id=None):
+        """Update shopping item"""
+        shopping_list = self.get_object()
+        item = get_object_or_404(
+            ShoppingItem,
+            id=item_id,
+            shopping_list=shopping_list
+        )
+        serializer = ShoppingItemSerializer(item, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['delete'], url_path='items/(?P<item_id>[^/.]+)')
+    def delete_item(self, request, pk=None, item_id=None):
+        """Delete shopping item"""
+        shopping_list = self.get_object()
+        item = get_object_or_404(
+            ShoppingItem,
+            id=item_id,
+            shopping_list=shopping_list
+        )
+        item.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=['post'], url_path='items/(?P<item_id>[^/.]+)/toggle')
+    def toggle_item(self, request, pk=None, item_id=None):
+        """Toggle checked status of shopping item"""
+        shopping_list = self.get_object()
+        item = get_object_or_404(
+            ShoppingItem,
+            id=item_id,
+            shopping_list=shopping_list
+        )
+        item.checked = not item.checked
+        item.save(update_fields=['checked', 'updated_at'])
+        serializer = ShoppingItemSerializer(item)
+        return Response(serializer.data)

@@ -432,3 +432,58 @@ class EventAssignment(models.Model):
 
     def __str__(self):
         return f"{self.event.title} -> {self.user.get_display_name()}"
+
+
+class ShoppingList(models.Model):
+    """
+    Shopping list for a family.
+    One shopping list per family (OneToOne relationship).
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    family = models.OneToOneField(
+        Family,
+        on_delete=models.CASCADE,
+        related_name='shopping_list',
+        help_text="The family that owns this shopping list"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Shopping List"
+        verbose_name_plural = "Shopping Lists"
+        ordering = ['family__name']
+
+    def __str__(self):
+        return f"Shopping List for {self.family.name}"
+
+
+class ShoppingItem(models.Model):
+    """
+    Individual items in a shopping list.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    shopping_list = models.ForeignKey(
+        ShoppingList,
+        on_delete=models.CASCADE,
+        related_name='items',
+        help_text="The shopping list this item belongs to"
+    )
+    name = models.CharField(max_length=200, help_text="Name of the shopping item")
+    checked = models.BooleanField(default=False, help_text="Whether the item has been checked off")
+    order = models.IntegerField(default=0, help_text="Display order of the item")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Shopping Item"
+        verbose_name_plural = "Shopping Items"
+        ordering = ['order', 'created_at']
+        indexes = [
+            models.Index(fields=['shopping_list', 'checked']),
+            models.Index(fields=['shopping_list', 'order']),
+        ]
+
+    def __str__(self):
+        status = "✓" if self.checked else "○"
+        return f"{status} {self.name}"
