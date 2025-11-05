@@ -127,13 +127,25 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         return attrs
     
     def create(self, validated_data):
-        """Create new user and family"""
+        """Create new user and family (or join existing family if family_id provided)"""
         password = validated_data.pop('password')
         password_confirm = validated_data.pop('password_confirm')
-        family_name = validated_data.pop('family_name')
+        family_name = validated_data.pop('family_name', '')
         
-        # Create family first
-        family = Family.objects.create(name=family_name)
+        # Check if family_id was passed in context (for invite links)
+        family_id = self.context.get('family_id', None)
+        
+        if family_id:
+            # Join existing family (invite link registration)
+            try:
+                family = Family.objects.get(id=family_id)
+            except Family.DoesNotExist:
+                raise serializers.ValidationError("Family not found")
+        else:
+            # Create new family (normal registration)
+            if not family_name:
+                raise serializers.ValidationError({"family_name": "Family name is required for new registrations"})
+            family = Family.objects.create(name=family_name)
         
         # Create user
         user = User.objects.create_user(

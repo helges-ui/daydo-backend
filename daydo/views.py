@@ -41,8 +41,36 @@ class AuthenticationViewSet(viewsets.ViewSet):
     
     @action(detail=False, methods=['post'], permission_classes=[AllowAny])
     def register(self, request):
-        """Register a new parent and create family (US-1)"""
-        serializer = UserRegistrationSerializer(data=request.data)
+        """Register a new parent and create family (US-1) or join existing family via invite token"""
+        # Check if family_token is provided (invite link registration)
+        family_token = request.data.get('family_token', None)
+        family_id = None
+        
+        if family_token:
+            # Decode family token to get family ID
+            import base64
+            try:
+                # Add padding if needed
+                padding = 4 - len(family_token) % 4
+                if padding != 4:
+                    family_token += '=' * padding
+                family_id = base64.urlsafe_b64decode(family_token.encode()).decode()
+                
+                # Verify family exists
+                try:
+                    family = Family.objects.get(id=family_id)
+                except Family.DoesNotExist:
+                    return Response(
+                        {'error': 'Invalid invite link. Family not found.'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            except Exception as e:
+                return Response(
+                    {'error': 'Invalid invite link token.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        
+        serializer = UserRegistrationSerializer(data=request.data, context={'request': request, 'family_id': family_id})
         if serializer.is_valid():
             user = serializer.save()
             return Response(
@@ -91,6 +119,43 @@ class FamilyViewSet(viewsets.ModelViewSet):
         return Family.objects.filter(members=self.request.user).prefetch_related(
             'members', 'child_profiles'
         )
+    
+    @action(detail=False, methods=['post'], url_path='generate-invite-link')
+    def generate_invite_link(self, request):
+        """Generate an invite link for the user's family"""
+        if not request.user.is_parent:
+            return Response(
+                {'error': 'Only parents can generate invite links.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        family = request.user.family
+        # Generate a secure token that includes the family ID
+        # Using base64 encoding of family ID for simplicity (can be enhanced with JWT later)
+        import base64
+        from django.conf import settings
+        family_token = base64.urlsafe_b64encode(str(family.id).encode()).decode().rstrip('=')
+        
+        # Get frontend URL from settings or use request origin
+        # Frontend URL should be set in settings.FRONTEND_URL
+        frontend_url = getattr(settings, 'FRONTEND_URL', None)
+        if not frontend_url:
+            # Fallback: try to construct from request
+            # In production, this should be set to the Amplify URL
+            frontend_url = f"{request.scheme}://{request.get_host()}"
+            # Remove /api if present
+            if frontend_url.endswith('/api'):
+                frontend_url = frontend_url[:-4]
+        
+        # Create invite link
+        invite_link = f"{frontend_url}/register/{family_token}"
+        
+        return Response({
+            'invite_link': invite_link,
+            'token': family_token,
+            'family_id': str(family.id),
+            'family_name': family.name
+        }, status=status.HTTP_200_OK)
     
     @action(detail=True, methods=['get'])
     def members(self, request, pk=None):
