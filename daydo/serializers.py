@@ -7,7 +7,7 @@ from rest_framework import serializers
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
-from .models import User, Family, ChildProfile, ChildUserPermissions
+from .models import User, Family, ChildProfile, ChildUserPermissions, UserRole, Role
 
 
 class FamilySerializer(serializers.ModelSerializer):
@@ -34,6 +34,8 @@ class FamilySerializer(serializers.ModelSerializer):
 
 class UserSerializer(serializers.ModelSerializer):
     """Serializer for User model"""
+    # Expose role as read-only string from relation (fallback to legacy field)
+    role = serializers.SerializerMethodField(read_only=True)
     role_display = serializers.CharField(source='get_role_display', read_only=True)
     family_name = serializers.CharField(source='family.name', read_only=True)
     display_name = serializers.CharField(source='get_display_name', read_only=True)
@@ -73,6 +75,16 @@ class UserSerializer(serializers.ModelSerializer):
         instance.save()
         return instance
 
+    def get_role(self, obj):
+        # Prefer relational role
+        try:
+            if hasattr(obj, 'user_role') and obj.user_role and obj.user_role.role:
+                return obj.user_role.role.key
+        except Exception:
+            pass
+        # Fallback to legacy char field
+        return obj.role
+
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
     """Serializer for user registration"""
@@ -107,10 +119,12 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         # Create user
         user = User.objects.create_user(
             family=family,
-            role='PARENT',
             password=password,
             **validated_data
         )
+        # Assign role via relation
+        role_obj, _ = Role.objects.get_or_create(key='PARENT', defaults={'name': 'Parent'})
+        UserRole.objects.create(user=user, role=role_obj)
         
         return user
 

@@ -33,6 +33,22 @@ class Family(models.Model):
         return self.name
 
 
+class Role(models.Model):
+    """System roles (e.g., PARENT, CHILD_USER)."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    key = models.CharField(max_length=32, unique=True)
+    name = models.CharField(max_length=64)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Role"
+        verbose_name_plural = "Roles"
+        ordering = ['key']
+
+    def __str__(self):
+        return self.key
+
+
 class User(AbstractUser):
     """
     Custom User model extending Django's AbstractUser to handle authentication
@@ -45,6 +61,7 @@ class User(AbstractUser):
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     family = models.ForeignKey(Family, on_delete=models.CASCADE, related_name='members')
+    # Deprecated: keep for backfill; do not trust for authorization
     role = models.CharField(max_length=15, choices=ROLE_CHOICES)
     email = models.EmailField(unique=True, null=True, blank=True, help_text="Optional for CHILD_USER")
     phone_number = models.CharField(
@@ -79,18 +96,24 @@ class User(AbstractUser):
     
     def clean(self):
         # Parents must have an email; children may omit it
-        if self.role == 'PARENT' and not self.email:
+        if self.is_parent and not self.email:
             raise ValidationError("Parent users must have an email.")
     
     @property
     def is_parent(self):
-        """Check if user is a parent"""
+        """Check if user is a parent (via user role relation if present)."""
+        rk = getattr(self, 'user_role', None)
+        if rk and rk.role:
+            return rk.role.key in ('PARENT', 'PARENT_USER', 'PARENT_ROLE') or rk.role.key == 'PARENT'
         return self.role == 'PARENT'
     
     @property
     def is_child_user(self):
-        """Check if user is a child user"""
-        return self.role == 'CHILD_USER'
+        """Check if user is a child user (via user role relation if present)."""
+        rk = getattr(self, 'user_role', None)
+        if rk and rk.role:
+            return rk.role.key in ('CHILD', 'CHILD_USER')
+        return False
     
     def can_manage_family(self):
         """Check if user can manage family settings"""
@@ -103,6 +126,22 @@ class User(AbstractUser):
     def get_display_name(self):
         """Get display name for UI"""
         return f"{self.first_name} {self.last_name}".strip() or self.username
+
+
+class UserRole(models.Model):
+    """One active role per user (simplified model)."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='user_role')
+    role = models.ForeignKey(Role, on_delete=models.PROTECT, related_name='assigned_users')
+    assigned_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='assigned_roles')
+    assigned_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "User Role"
+        verbose_name_plural = "User Roles"
+
+    def __str__(self):
+        return f"{self.user.username} -> {self.role.key}"
 
 
 class ChildProfile(models.Model):
@@ -270,7 +309,7 @@ class ChildUserPermissions(models.Model):
     @classmethod
     def create_default_permissions(cls, user):
         """Create default permissions for a new CHILD_USER"""
-        if user.role == 'CHILD_USER':
+        if getattr(user, 'user_role', None) and getattr(user.user_role, 'role', None) and user.user_role.role.key in ('CHILD', 'CHILD_USER'):
             return cls.objects.create(user=user)
         return None
     
