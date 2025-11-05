@@ -57,6 +57,8 @@ class UserSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         """Create a new user with hashed password"""
         password = validated_data.pop('password', None)
+        # Remove role from validated_data - it's set via UserRole relation
+        validated_data.pop('role', None)
         user = User.objects.create_user(**validated_data)
         if password:
             user.set_password(password)
@@ -66,6 +68,8 @@ class UserSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         """Update user instance"""
         password = validated_data.pop('password', None)
+        # Remove role from validated_data - it's read-only
+        validated_data.pop('role', None)
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         

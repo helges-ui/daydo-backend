@@ -13,8 +13,10 @@ from django.contrib.auth import authenticate
 from django.utils import timezone
 from datetime import timedelta
 from django.http import JsonResponse
+from django.core.exceptions import ValidationError as DjangoValidationError
+from rest_framework.exceptions import ValidationError as DRFValidationError
 
-from .models import User, Family, ChildProfile, ChildUserPermissions
+from .models import User, Family, ChildProfile, ChildUserPermissions, Role, UserRole
 from .services.auth_service import AuthService
 from .services.dashboard_service import DashboardService
 from .serializers import (
@@ -109,6 +111,18 @@ class FamilyViewSet(viewsets.ModelViewSet):
             'family', 'manager', 'linked_user'
         ).prefetch_related('linked_user__childuserpermissions').all()
         serializer = ChildProfileSerializer(children, many=True)
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['get'])
+    def current(self, request):
+        """Get current user's family info"""
+        family = request.user.family
+        if not family:
+            return Response(
+                {'error': 'User has no family assigned'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        serializer = FamilySerializer(family)
         return Response(serializer.data)
     
     @action(detail=True, methods=['get'])
@@ -260,16 +274,110 @@ class UserViewSet(viewsets.ModelViewSet):
     def create_child(self, request):
         """Create a child user (no email required)."""
         family = request.user.family
+        if not family:
+            return Response(
+                {'error': 'User has no family assigned'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
         data = request.data.copy()
         data['family'] = str(family.id)
-        data['role'] = 'CHILD_USER'
         # Ensure email is not required for child
         data.setdefault('email', None)
+        # Remove role from data - it will be set via UserRole relation
+        data.pop('role', None)
+        
         serializer = UserSerializer(data=data)
         if serializer.is_valid():
             user = serializer.save()
+            
+            # Assign CHILD role via UserRole relation
+            try:
+                child_role, _ = Role.objects.get_or_create(
+                    key='CHILD',
+                    defaults={'name': 'Child'}
+                )
+                UserRole.objects.create(
+                    user=user,
+                    role=child_role,
+                    assigned_by=request.user
+                )
+            except Exception as e:
+                # If role assignment fails, delete the user and return error
+                user.delete()
+                return Response(
+                    {'error': f'Failed to assign role: {str(e)}'},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+            
             return Response(UserSerializer(user).data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    def update(self, request, *args, **kwargs):
+        """Update user (PATCH/PUT) - Ensure role cannot be updated"""
+        # Remove role from data if present (it's read-only)
+        if 'role' in request.data:
+            request.data.pop('role')
+        
+        # Ensure user can only update own profile or parent can update any child
+        instance = self.get_object()
+        if not (request.user == instance or (request.user.is_parent and instance.is_child_user)):
+            return Response(
+                {'error': 'You do not have permission to update this user.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        return super().update(request, *args, **kwargs)
+    
+    def partial_update(self, request, *args, **kwargs):
+        """Partial update user (PATCH) - Ensure role cannot be updated"""
+        # Remove role from data if present (it's read-only)
+        if 'role' in request.data:
+            request.data.pop('role')
+        
+        # Ensure user can only update own profile or parent can update any child
+        instance = self.get_object()
+        if not (request.user == instance or (request.user.is_parent and instance.is_child_user)):
+            return Response(
+                {'error': 'You do not have permission to update this user.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        return super().partial_update(request, *args, **kwargs)
+    
+    def destroy(self, request, *args, **kwargs):
+        """Delete user - Only parents can delete children, cannot delete last parent"""
+        instance = self.get_object()
+        
+        # Only parents can delete users
+        if not request.user.is_parent:
+            return Response(
+                {'error': 'Only parents can delete users.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # Cannot delete yourself
+        if request.user == instance:
+            return Response(
+                {'error': 'You cannot delete your own account.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Check if deleting last parent in family
+        if instance.is_parent:
+            family_parents = User.objects.filter(
+                family=instance.family,
+                user_role__role__key='PARENT'
+            ).exclude(id=instance.id)
+            
+            if not family_parents.exists():
+                return Response(
+                    {'error': 'Cannot delete the last parent in the family.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        
+        # UserRole will be cascade deleted automatically
+        return super().destroy(request, *args, **kwargs)
     
     @action(detail=False, methods=['get'])
     def me(self, request):
