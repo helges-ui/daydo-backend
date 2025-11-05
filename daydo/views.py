@@ -17,7 +17,7 @@ from django.http import JsonResponse
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework.exceptions import ValidationError as DRFValidationError
 
-from .models import User, Family, ChildProfile, ChildUserPermissions, Role, UserRole, Task, Event, EventAssignment, ShoppingList, ShoppingItem
+from .models import User, Family, ChildProfile, ChildUserPermissions, Role, UserRole, Task, Event, EventAssignment, ShoppingList, ShoppingItem, TodoList, TodoTask
 from .services.auth_service import AuthService
 from .services.dashboard_service import DashboardService
 from .serializers import (
@@ -25,7 +25,8 @@ from .serializers import (
     ChildProfileSerializer, ChildProfileCreateSerializer,
     ChildUserPermissionsSerializer, LoginSerializer,
     InviteParentSerializer, FamilyMembersSerializer, DashboardSerializer,
-    TaskSerializer, EventSerializer, ShoppingListSerializer, ShoppingItemSerializer
+    TaskSerializer, EventSerializer, ShoppingListSerializer, ShoppingItemSerializer,
+    TodoListSerializer, TodoTaskSerializer
 )
 from .permissions import (
     IsParentPermission, IsChildUserPermission, CanManageFamilyPermission,
@@ -706,4 +707,86 @@ class ShoppingListViewSet(viewsets.ModelViewSet):
         item.checked = not item.checked
         item.save(update_fields=['checked', 'updated_at'])
         serializer = ShoppingItemSerializer(item)
+        return Response(serializer.data)
+
+
+class TodoListViewSet(viewsets.ModelViewSet):
+    """Todo list management endpoints"""
+    serializer_class = TodoListSerializer
+    permission_classes = [IsAuthenticated, FamilyMemberPermission]
+
+    def get_queryset(self):
+        """Return todo lists for the user's family"""
+        user = self.request.user
+        queryset = TodoList.objects.filter(family=user.family).select_related(
+            'family', 'created_by'
+        ).prefetch_related('tasks')
+
+        # Filter by is_shared if provided
+        is_shared = self.request.query_params.get('is_shared', None)
+        if is_shared is not None:
+            is_shared_bool = is_shared.lower() == 'true'
+            queryset = queryset.filter(is_shared=is_shared_bool)
+
+        return queryset.order_by('-created_at')
+
+    def perform_create(self, serializer):
+        """Create todo list with family and created_by from request"""
+        serializer.save(
+            family=self.request.user.family,
+            created_by=self.request.user
+        )
+
+    @action(detail=True, methods=['post'], url_path='tasks')
+    def add_task(self, request, pk=None):
+        """Add task to todo list"""
+        todo_list = self.get_object()
+        serializer = TodoTaskSerializer(
+            data=request.data,
+            context={'request': request, 'todo_list': todo_list}
+        )
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['patch'], url_path='tasks/(?P<task_id>[^/.]+)')
+    def update_task(self, request, pk=None, task_id=None):
+        """Update todo task"""
+        todo_list = self.get_object()
+        task = get_object_or_404(
+            TodoTask,
+            id=task_id,
+            todo_list=todo_list
+        )
+        serializer = TodoTaskSerializer(task, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['delete'], url_path='tasks/(?P<task_id>[^/.]+)')
+    def delete_task(self, request, pk=None, task_id=None):
+        """Delete todo task"""
+        todo_list = self.get_object()
+        task = get_object_or_404(
+            TodoTask,
+            id=task_id,
+            todo_list=todo_list
+        )
+        task.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=['post'], url_path='tasks/(?P<task_id>[^/.]+)/toggle')
+    def toggle_task(self, request, pk=None, task_id=None):
+        """Toggle completed status of todo task"""
+        todo_list = self.get_object()
+        task = get_object_or_404(
+            TodoTask,
+            id=task_id,
+            todo_list=todo_list
+        )
+        task.completed = not task.completed
+        task.save(update_fields=['completed', 'updated_at'])
+        serializer = TodoTaskSerializer(task)
         return Response(serializer.data)

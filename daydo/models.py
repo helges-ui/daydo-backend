@@ -487,3 +487,73 @@ class ShoppingItem(models.Model):
     def __str__(self):
         status = "✓" if self.checked else "○"
         return f"{status} {self.name}"
+
+
+class TodoList(models.Model):
+    """
+    Todo lists that can be shared or personal.
+    Multiple todo lists per family.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    family = models.ForeignKey(
+        Family,
+        on_delete=models.CASCADE,
+        related_name='todo_lists',
+        help_text="The family that owns this todo list"
+    )
+    name = models.CharField(max_length=200, help_text="Name of the todo list")
+    description = models.TextField(blank=True, null=True, help_text="Optional description")
+    is_shared = models.BooleanField(default=True, help_text="Whether the list is shared with family")
+    color = models.CharField(max_length=20, blank=True, default='blue', help_text="Color theme for the list")
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='created_todo_lists',
+        help_text="User who created this todo list"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Todo List"
+        verbose_name_plural = "Todo Lists"
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['family', 'is_shared']),
+            models.Index(fields=['created_by']),
+        ]
+
+    def __str__(self):
+        share_status = "Shared" if self.is_shared else "Personal"
+        return f"{self.name} ({share_status})"
+
+
+class TodoTask(models.Model):
+    """
+    Individual tasks within a todo list.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    todo_list = models.ForeignKey(
+        TodoList,
+        on_delete=models.CASCADE,
+        related_name='tasks',
+        help_text="The todo list this task belongs to"
+    )
+    title = models.CharField(max_length=200, help_text="Title of the task")
+    completed = models.BooleanField(default=False, help_text="Whether the task is completed")
+    order = models.IntegerField(default=0, help_text="Display order of the task")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Todo Task"
+        verbose_name_plural = "Todo Tasks"
+        ordering = ['order', 'created_at']
+        indexes = [
+            models.Index(fields=['todo_list', 'completed']),
+            models.Index(fields=['todo_list', 'order']),
+        ]
+
+    def __str__(self):
+        status = "✓" if self.completed else "○"
+        return f"{status} {self.title}"

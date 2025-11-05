@@ -7,7 +7,8 @@ from rest_framework import serializers
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
-from .models import User, Family, ChildProfile, ChildUserPermissions, UserRole, Role, Task, Event, EventAssignment, ShoppingList, ShoppingItem
+from django.db.models import Max
+from .models import User, Family, ChildProfile, ChildUserPermissions, UserRole, Role, Task, Event, EventAssignment, ShoppingList, ShoppingItem, TodoList, TodoTask
 
 
 class FamilySerializer(serializers.ModelSerializer):
@@ -448,3 +449,56 @@ class ShoppingListSerializer(serializers.ModelSerializer):
     def get_unchecked_items_count(self, obj):
         """Get number of unchecked items"""
         return obj.items.filter(checked=False).count()
+
+
+class TodoTaskSerializer(serializers.ModelSerializer):
+    """Serializer for TodoTask model"""
+    
+    class Meta:
+        model = TodoTask
+        fields = [
+            'id', 'todo_list', 'title', 'completed', 'order',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'todo_list', 'created_at', 'updated_at']
+
+    def create(self, validated_data):
+        """Create todo task with todo_list from request context"""
+        todo_list = self.context.get('todo_list')
+        
+        if todo_list:
+            validated_data['todo_list'] = todo_list
+        
+        # Set order based on current max order + 1
+        if 'order' not in validated_data or validated_data.get('order') == 0:
+            max_order = todo_list.tasks.aggregate(
+                max_order=Max('order')
+            )['max_order'] or 0
+            validated_data['order'] = max_order + 1
+        
+        return super().create(validated_data)
+
+
+class TodoListSerializer(serializers.ModelSerializer):
+    """Serializer for TodoList model"""
+    tasks = TodoTaskSerializer(many=True, read_only=True)
+    tasks_count = serializers.SerializerMethodField()
+    completed_count = serializers.SerializerMethodField()
+    created_by_name = serializers.CharField(source='created_by.get_display_name', read_only=True)
+    
+    class Meta:
+        model = TodoList
+        fields = [
+            'id', 'family', 'name', 'description', 'is_shared', 'color',
+            'created_by', 'created_by_name', 'tasks', 'tasks_count', 'completed_count',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'family', 'created_by', 'created_at', 'updated_at']
+    
+    def get_tasks_count(self, obj):
+        """Get total number of tasks"""
+        return obj.tasks.count()
+    
+    def get_completed_count(self, obj):
+        """Get number of completed tasks"""
+        return obj.tasks.filter(completed=True).count()
