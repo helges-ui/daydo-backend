@@ -7,7 +7,7 @@ from rest_framework import serializers
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
-from .models import User, Family, ChildProfile, ChildUserPermissions, UserRole, Role
+from .models import User, Family, ChildProfile, ChildUserPermissions, UserRole, Role, Task, Event, EventAssignment
 
 
 class FamilySerializer(serializers.ModelSerializer):
@@ -304,3 +304,90 @@ class DashboardSerializer(serializers.Serializer):
             'family_name', 'total_members', 'total_children',
             'children_with_accounts', 'children_view_only', 'recent_activity'
         ]
+
+
+class TaskSerializer(serializers.ModelSerializer):
+    """Serializer for Task model"""
+    assigned_to_name = serializers.CharField(source='assigned_to.get_display_name', read_only=True)
+    assigned_to_avatar = serializers.CharField(source='assigned_to.avatar', read_only=True)
+    assigned_to_color = serializers.CharField(source='assigned_to.color', read_only=True)
+    created_by_name = serializers.CharField(source='created_by.get_display_name', read_only=True)
+    
+    class Meta:
+        model = Task
+        fields = [
+            'id', 'family', 'assigned_to', 'assigned_to_name', 'assigned_to_avatar', 
+            'assigned_to_color', 'title', 'description', 'date', 'completed', 
+            'completed_at', 'points', 'icon', 'created_by', 'created_by_name',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'family', 'created_by', 'created_at', 'updated_at', 'completed_at']
+    
+    def create(self, validated_data):
+        """Create task with family and created_by from request context"""
+        request = self.context.get('request')
+        if request and request.user:
+            validated_data['family'] = request.user.family
+            validated_data['created_by'] = request.user
+        return super().create(validated_data)
+
+
+class EventSerializer(serializers.ModelSerializer):
+    """Serializer for Event model"""
+    assigned_to = serializers.SerializerMethodField()
+    assigned_to_ids = serializers.PrimaryKeyRelatedField(
+        many=True,
+        queryset=User.objects.all(),
+        write_only=True,
+        required=False
+    )
+    created_by_name = serializers.CharField(source='created_by.get_display_name', read_only=True)
+    
+    class Meta:
+        model = Event
+        fields = [
+            'id', 'family', 'title', 'description', 'start_datetime', 'end_datetime',
+            'location', 'reminder_minutes', 'recurrence_rule', 'created_by', 
+            'created_by_name', 'assigned_to', 'assigned_to_ids', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'family', 'created_by', 'created_at', 'updated_at']
+    
+    def get_assigned_to(self, obj):
+        """Get list of assigned user IDs"""
+        return [assignment.user.id for assignment in obj.assignments.all()]
+    
+    def create(self, validated_data):
+        """Create event with family and created_by from request context"""
+        request = self.context.get('request')
+        assigned_user_ids = validated_data.pop('assigned_to_ids', [])
+        
+        if request and request.user:
+            validated_data['family'] = request.user.family
+            validated_data['created_by'] = request.user
+        
+        event = super().create(validated_data)
+        
+        # Create event assignments
+        for user in assigned_user_ids:
+            EventAssignment.objects.create(event=event, user=user)
+        
+        return event
+    
+    def update(self, instance, validated_data):
+        """Update event and assignments"""
+        assigned_user_ids = validated_data.pop('assigned_to_ids', None)
+        
+        # Update event fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        
+        # Update assignments if provided
+        if assigned_user_ids is not None:
+            # Clear existing assignments
+            instance.assignments.all().delete()
+            # Create new assignments
+            for user in assigned_user_ids:
+                EventAssignment.objects.create(event=instance, user=user)
+        
+        return instance

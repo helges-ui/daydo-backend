@@ -16,14 +16,15 @@ from django.http import JsonResponse
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework.exceptions import ValidationError as DRFValidationError
 
-from .models import User, Family, ChildProfile, ChildUserPermissions, Role, UserRole
+from .models import User, Family, ChildProfile, ChildUserPermissions, Role, UserRole, Task, Event, EventAssignment
 from .services.auth_service import AuthService
 from .services.dashboard_service import DashboardService
 from .serializers import (
     FamilySerializer, UserSerializer, UserRegistrationSerializer,
     ChildProfileSerializer, ChildProfileCreateSerializer,
     ChildUserPermissionsSerializer, LoginSerializer,
-    InviteParentSerializer, FamilyMembersSerializer, DashboardSerializer
+    InviteParentSerializer, FamilyMembersSerializer, DashboardSerializer,
+    TaskSerializer, EventSerializer
 )
 from .permissions import (
     IsParentPermission, IsChildUserPermission, CanManageFamilyPermission,
@@ -460,3 +461,97 @@ class HealthCheckView(APIView):
 
     def get(self, request):
         return JsonResponse({'status': 'ok'}, status=200)
+
+
+class TaskViewSet(viewsets.ModelViewSet):
+    """Task management endpoints"""
+    serializer_class = TaskSerializer
+    permission_classes = [IsAuthenticated, FamilyMemberPermission]
+    
+    def get_queryset(self):
+        """Return tasks for the user's family"""
+        user = self.request.user
+        queryset = Task.objects.filter(family=user.family).select_related(
+            'family', 'assigned_to', 'created_by'
+        )
+        
+        # Filter by assigned_to if provided
+        assigned_to = self.request.query_params.get('assigned_to', None)
+        if assigned_to:
+            queryset = queryset.filter(assigned_to_id=assigned_to)
+        
+        # Filter by date if provided
+        date = self.request.query_params.get('date', None)
+        if date:
+            queryset = queryset.filter(date=date)
+        
+        # Filter by completed status if provided
+        completed = self.request.query_params.get('completed', None)
+        if completed is not None:
+            completed_bool = completed.lower() == 'true'
+            queryset = queryset.filter(completed=completed_bool)
+        
+        return queryset.order_by('-date', 'title')
+    
+    def perform_create(self, serializer):
+        """Create task with family and created_by from request"""
+        serializer.save(
+            family=self.request.user.family,
+            created_by=self.request.user
+        )
+    
+    @action(detail=True, methods=['post'], url_path='toggle-complete')
+    def toggle_complete(self, request, pk=None):
+        """Toggle task completion status"""
+        task = self.get_object()
+        
+        # Only the assigned user or a parent can toggle completion
+        if task.assigned_to != request.user and not request.user.is_parent:
+            return Response(
+                {'error': 'You do not have permission to toggle this task.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        if task.completed:
+            task.mark_incomplete()
+        else:
+            task.mark_completed()
+        
+        serializer = self.get_serializer(task)
+        return Response(serializer.data)
+
+
+class EventViewSet(viewsets.ModelViewSet):
+    """Event management endpoints"""
+    serializer_class = EventSerializer
+    permission_classes = [IsAuthenticated, FamilyMemberPermission]
+    
+    def get_queryset(self):
+        """Return events for the user's family"""
+        user = self.request.user
+        queryset = Event.objects.filter(family=user.family).select_related(
+            'family', 'created_by'
+        ).prefetch_related('assignments__user')
+        
+        # Filter by date range if provided
+        start_date = self.request.query_params.get('start_date', None)
+        end_date = self.request.query_params.get('end_date', None)
+        
+        if start_date:
+            queryset = queryset.filter(start_datetime__gte=start_date)
+        if end_date:
+            queryset = queryset.filter(start_datetime__lte=end_date)
+        
+        # Filter by assigned_to if provided
+        assigned_to = self.request.query_params.get('assigned_to', None)
+        if assigned_to:
+            queryset = queryset.filter(assignments__user_id=assigned_to)
+        
+        return queryset.order_by('start_datetime')
+    
+    def perform_create(self, serializer):
+        """Create event with family and created_by from request"""
+        serializer.save(
+            family=self.request.user.family,
+            created_by=self.request.user
+        )

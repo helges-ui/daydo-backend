@@ -316,3 +316,119 @@ class ChildUserPermissions(models.Model):
     def has_permission(self, permission_name):
         """Check if user has a specific permission"""
         return getattr(self, permission_name, False)
+
+
+class Task(models.Model):
+    """
+    Daily tasks assigned to users (children).
+    Tasks are family-scoped and can be assigned to child users.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    family = models.ForeignKey(Family, on_delete=models.CASCADE, related_name='tasks')
+    assigned_to = models.ForeignKey(
+        User, 
+        on_delete=models.CASCADE, 
+        related_name='assigned_tasks',
+        limit_choices_to={'user_role__role__key': 'CHILD'}
+    )
+    title = models.CharField(max_length=200)
+    description = models.TextField(blank=True, null=True)
+    date = models.DateField(help_text="Date for which this task is assigned")
+    completed = models.BooleanField(default=False)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    points = models.IntegerField(default=1, help_text="Points awarded upon completion")
+    icon = models.CharField(max_length=20, blank=True, help_text="Emoji or icon reference")
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='created_tasks',
+        limit_choices_to={'user_role__role__key': 'PARENT'}
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Task"
+        verbose_name_plural = "Tasks"
+        ordering = ['date', 'title']
+        indexes = [
+            models.Index(fields=['family', 'date']),
+            models.Index(fields=['assigned_to', 'date']),
+            models.Index(fields=['completed']),
+        ]
+
+    def __str__(self):
+        return f"{self.title} ({self.assigned_to.get_display_name()})"
+
+    def mark_completed(self):
+        """Mark task as completed"""
+        from django.utils import timezone
+        self.completed = True
+        self.completed_at = timezone.now()
+        self.save(update_fields=['completed', 'completed_at', 'updated_at'])
+
+    def mark_incomplete(self):
+        """Mark task as incomplete"""
+        self.completed = False
+        self.completed_at = None
+        self.save(update_fields=['completed', 'completed_at', 'updated_at'])
+
+
+class Event(models.Model):
+    """
+    Calendar events for the family.
+    Events can be assigned to multiple users via EventAssignment.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    family = models.ForeignKey(Family, on_delete=models.CASCADE, related_name='events')
+    title = models.CharField(max_length=200)
+    description = models.TextField(blank=True, null=True)
+    start_datetime = models.DateTimeField(help_text="Start date and time of the event")
+    end_datetime = models.DateTimeField(null=True, blank=True, help_text="End date and time of the event")
+    location = models.CharField(max_length=200, blank=True, null=True)
+    reminder_minutes = models.IntegerField(null=True, blank=True, help_text="Reminder minutes before event")
+    recurrence_rule = models.CharField(
+        max_length=500, 
+        blank=True, 
+        null=True,
+        help_text="RRULE string for recurring events (RFC 5545)"
+    )
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='created_events'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Event"
+        verbose_name_plural = "Events"
+        ordering = ['start_datetime']
+        indexes = [
+            models.Index(fields=['family', 'start_datetime']),
+            models.Index(fields=['start_datetime']),
+        ]
+
+    def __str__(self):
+        return f"{self.title} ({self.start_datetime})"
+
+
+class EventAssignment(models.Model):
+    """
+    Many-to-many relationship between events and users.
+    Links events to family members who are assigned to the event.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name='assignments')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='event_assignments')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Event Assignment"
+        verbose_name_plural = "Event Assignments"
+        unique_together = ['event', 'user']
+        ordering = ['event', 'user']
+
+    def __str__(self):
+        return f"{self.event.title} -> {self.user.get_display_name()}"
