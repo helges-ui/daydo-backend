@@ -67,9 +67,20 @@ class User(AbstractUser):
         verbose_name = "User"
         verbose_name_plural = "Users"
         ordering = ['first_name', 'last_name']
+        constraints = [
+            models.CheckConstraint(
+                name='chk_parent_requires_email',
+                check=(models.Q(role='PARENT', email__isnull=False) | ~models.Q(role='PARENT')),
+            )
+        ]
     
     def __str__(self):
         return f"{self.first_name} ({self.get_role_display()})"
+    
+    def clean(self):
+        # Parents must have an email; children may omit it
+        if self.role == 'PARENT' and not self.email:
+            raise ValidationError("Parent users must have an email.")
     
     @property
     def is_parent(self):

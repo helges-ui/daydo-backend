@@ -256,6 +256,21 @@ class UserViewSet(viewsets.ModelViewSet):
             family=self.request.user.family
         ).select_related('family').prefetch_related('childuserpermissions')
     
+    @action(detail=False, methods=['post'], url_path='children')
+    def create_child(self, request):
+        """Create a child user (no email required)."""
+        family = request.user.family
+        data = request.data.copy()
+        data['family'] = str(family.id)
+        data['role'] = 'CHILD_USER'
+        # Ensure email is not required for child
+        data.setdefault('email', None)
+        serializer = UserSerializer(data=data)
+        if serializer.is_valid():
+            user = serializer.save()
+            return Response(UserSerializer(user).data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
     @action(detail=False, methods=['get'])
     def me(self, request):
         """Get current user profile"""
