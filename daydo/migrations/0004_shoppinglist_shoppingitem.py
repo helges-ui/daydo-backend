@@ -8,7 +8,7 @@ import uuid
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('daydo', '0008_event_task_eventassignment_and_more'),
+        ('daydo', '0003_event_eventassignment_role_task_userrole_and_more'),
     ]
 
     operations = [
