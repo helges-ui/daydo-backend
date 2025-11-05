@@ -1,5 +1,5 @@
 #!/bin/bash
-# Script to apply Phase 2 & 3 migrations on Lightsail server
+# Script to apply migrations on Lightsail server
 # Server IP: 13.36.190.238
 
 set -e
@@ -20,13 +20,13 @@ fi
 chmod 600 "$SSH_KEY"
 
 echo "=========================================="
-echo "Applying Phase 2 & 3 Migrations"
+echo "Applying Database Migrations"
 echo "Server: ${SERVER_USER}@${SERVER_IP}"
 echo "SSH Key: $SSH_KEY"
 echo "=========================================="
 echo ""
 
-echo "Connecting to server and applying migration..."
+echo "Connecting to server and applying migrations..."
 echo ""
 
 # SSH to server and run migration
@@ -66,6 +66,14 @@ elif [ -d ".venv" ]; then
     source .venv/bin/activate
 fi
 
+# Use python3 if available, otherwise use python
+PYTHON_CMD="python3"
+if ! command -v python3 &> /dev/null; then
+    PYTHON_CMD="python"
+fi
+echo "Using Python command: $PYTHON_CMD"
+echo ""
+
 # Pull latest changes (if using git)
 if [ -d ".git" ]; then
     echo "Checking git status..."
@@ -91,25 +99,30 @@ if [ -d ".git" ]; then
     fi
 fi
 
-# Check if migration file exists
-if [ ! -f "daydo/migrations/0003_event_eventassignment_role_task_userrole_and_more.py" ]; then
-    echo "Error: Migration file not found!"
-    echo "Please ensure the migration file is present in daydo/migrations/"
-    exit 1
+# Check for migration files
+echo "Checking for migration files..."
+ls -la daydo/migrations/ | tail -5 || echo "Could not list migrations"
+echo ""
+
+# Check if there are pending migrations
+PENDING_MIGRATIONS=$($PYTHON_CMD manage.py showmigrations daydo | grep -E "\[ \]" | wc -l)
+if [ "$PENDING_MIGRATIONS" -eq 0 ]; then
+    echo "No pending migrations found."
+    echo "All migrations are already applied."
+    exit 0
 fi
 
-echo "Migration file found:"
-echo "  daydo/migrations/0003_event_eventassignment_role_task_userrole_and_more.py"
+echo "Found $PENDING_MIGRATIONS pending migration(s)"
 echo ""
 
 # Show pending migrations
 echo "Checking for pending migrations..."
-python manage.py showmigrations daydo | grep -E "\[ \]" || echo "No pending migrations found"
+$PYTHON_CMD manage.py showmigrations daydo | grep -E "\[ \]" || echo "No pending migrations found"
 echo ""
 
 # Apply migrations
 echo "Applying migrations..."
-python manage.py migrate daydo
+$PYTHON_CMD manage.py migrate daydo
 
 echo ""
 echo "=========================================="
@@ -119,10 +132,20 @@ echo "=========================================="
 # Verify migration
 echo ""
 echo "Verifying migration status..."
-python manage.py showmigrations daydo | tail -5
+$PYTHON_CMD manage.py showmigrations daydo | tail -10
+
+# Restart services if needed
+echo ""
+echo "Checking if services need restart..."
+if systemctl is-active --quiet daydo-gunicorn; then
+    echo "Restarting Gunicorn service..."
+    sudo systemctl restart daydo-gunicorn || echo "Could not restart Gunicorn"
+else
+    echo "Gunicorn service not running or not managed by systemd"
+fi
 
 echo ""
-echo "Done! Phase 2 & 3 migrations have been applied."
+echo "Done! All migrations have been applied."
 ENDSSH
 
 echo ""
