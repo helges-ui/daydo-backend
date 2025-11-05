@@ -59,7 +59,13 @@ class UserSerializer(serializers.ModelSerializer):
         password = validated_data.pop('password', None)
         # Remove role from validated_data - it's set via UserRole relation
         validated_data.pop('role', None)
-        user = User.objects.create_user(**validated_data)
+        # Convert empty email string to None to avoid unique constraint violation
+        # Django's create_user normalizes empty strings, so we need to explicitly pass None
+        email = validated_data.pop('email', None)
+        if email == '' or email is None:
+            email = None
+        # Pass email explicitly to create_user to ensure None is used, not empty string
+        user = User.objects.create_user(email=email, **validated_data)
         if password:
             user.set_password(password)
             user.save()

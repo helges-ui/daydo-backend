@@ -282,8 +282,11 @@ class UserViewSet(viewsets.ModelViewSet):
         
         data = request.data.copy()
         data['family'] = str(family.id)
-        # Ensure email is not required for child
-        data.setdefault('email', None)
+        # Ensure email is not required for child - convert empty string to None
+        if 'email' in data and (data['email'] == '' or data['email'] is None):
+            data['email'] = None
+        else:
+            data.setdefault('email', None)
         # Remove role from data - it will be set via UserRole relation
         data.pop('role', None)
         
