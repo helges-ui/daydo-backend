@@ -352,9 +352,20 @@ class EventSerializer(serializers.ModelSerializer):
         many=True,
         queryset=User.objects.all(),
         write_only=True,
-        required=False
+        required=False,
+        source='assignments.user'
     )
     created_by_name = serializers.CharField(source='created_by.get_display_name', read_only=True)
+    
+    def to_internal_value(self, data):
+        """Handle assigned_to field (list of IDs) and convert to assigned_to_ids"""
+        if 'assigned_to' in data and 'assigned_to_ids' not in data:
+            # Convert assigned_to (list of IDs) to assigned_to_ids (User objects)
+            assigned_to_ids = data.get('assigned_to', [])
+            if assigned_to_ids:
+                data = data.copy()
+                data['assigned_to_ids'] = assigned_to_ids
+        return super().to_internal_value(data)
     
     class Meta:
         model = Event
@@ -388,7 +399,13 @@ class EventSerializer(serializers.ModelSerializer):
     
     def update(self, instance, validated_data):
         """Update event and assignments"""
+        # Handle both assigned_to_ids (PrimaryKeyRelatedField) and assigned_to (list of IDs)
         assigned_user_ids = validated_data.pop('assigned_to_ids', None)
+        assigned_to = validated_data.pop('assigned_to', None)
+        
+        # If assigned_to is provided (list of IDs), convert to User objects
+        if assigned_to is not None and assigned_user_ids is None:
+            assigned_user_ids = User.objects.filter(id__in=assigned_to)
         
         # Update event fields
         for attr, value in validated_data.items():
@@ -402,8 +419,8 @@ class EventSerializer(serializers.ModelSerializer):
             # Create new assignments
             for user in assigned_user_ids:
                 EventAssignment.objects.create(event=instance, user=user)
-
-            return instance
+        
+        return instance
 
 
 class ShoppingItemSerializer(serializers.ModelSerializer):
