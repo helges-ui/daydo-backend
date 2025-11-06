@@ -358,12 +358,20 @@ class EventSerializer(serializers.ModelSerializer):
     
     def to_internal_value(self, data):
         """Handle assigned_to field (list of IDs) and convert to assigned_to_ids"""
+        # Make a mutable copy if needed
+        if hasattr(data, '_mutable'):
+            data = data.copy()
+        elif isinstance(data, dict):
+            data = data.copy()
+        
         if 'assigned_to' in data and 'assigned_to_ids' not in data:
-            # Convert assigned_to (list of IDs) to assigned_to_ids (User objects)
+            # Convert assigned_to (list of IDs) to assigned_to_ids
+            # PrimaryKeyRelatedField will handle the conversion from IDs to User objects
             assigned_to_ids = data.get('assigned_to', [])
             if assigned_to_ids:
-                data = data.copy()
                 data['assigned_to_ids'] = assigned_to_ids
+            # Remove assigned_to from data since it's read-only
+            data.pop('assigned_to', None)
         return super().to_internal_value(data)
     
     class Meta:
