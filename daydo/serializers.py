@@ -8,7 +8,7 @@ from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.db.models import Max
-from .models import User, Family, ChildProfile, ChildUserPermissions, UserRole, Role, Task, Event, EventAssignment, ShoppingList, ShoppingItem, TodoList, TodoTask
+from .models import User, Family, ChildProfile, ChildUserPermissions, UserRole, Role, Task, Event, EventAssignment, ShoppingList, ShoppingItem, TodoList, TodoTask, Note
 
 
 class FamilySerializer(serializers.ModelSerializer):
@@ -521,3 +521,33 @@ class TodoListSerializer(serializers.ModelSerializer):
     def get_completed_count(self, obj):
         """Get number of completed tasks"""
         return obj.tasks.filter(completed=True).count()
+
+
+class NoteSerializer(serializers.ModelSerializer):
+    """Serializer for Note model"""
+    created_by_name = serializers.CharField(source='created_by.get_display_name', read_only=True)
+    updated_by_name = serializers.CharField(source='updated_by.get_display_name', read_only=True)
+    
+    class Meta:
+        model = Note
+        fields = [
+            'id', 'family', 'created_by', 'created_by_name',
+            'updated_by', 'updated_by_name', 'title', 'content',
+            'is_shared', 'color', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'family', 'created_by', 'updated_by', 'created_at', 'updated_at']
+    
+    def create(self, validated_data):
+        """Create note with family and created_by from request context"""
+        request = self.context.get('request')
+        if request and request.user:
+            validated_data['family'] = request.user.family
+            validated_data['created_by'] = request.user
+        return super().create(validated_data)
+    
+    def update(self, instance, validated_data):
+        """Update note and set updated_by"""
+        request = self.context.get('request')
+        if request and request.user:
+            validated_data['updated_by'] = request.user
+        return super().update(instance, validated_data)

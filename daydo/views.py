@@ -4,7 +4,7 @@ These views implement the role-based access control and API endpoints
 defined in the product backlog.
 """
 from rest_framework import viewsets, status, permissions
-from django.db.models import Max
+from django.db.models import Max, Q
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -17,7 +17,7 @@ from django.http import JsonResponse
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework.exceptions import ValidationError as DRFValidationError
 
-from .models import User, Family, ChildProfile, ChildUserPermissions, Role, UserRole, Task, Event, EventAssignment, ShoppingList, ShoppingItem, TodoList, TodoTask
+from .models import User, Family, ChildProfile, ChildUserPermissions, Role, UserRole, Task, Event, EventAssignment, ShoppingList, ShoppingItem, TodoList, TodoTask, Note
 from .services.auth_service import AuthService
 from .services.dashboard_service import DashboardService
 from .serializers import (
@@ -26,7 +26,7 @@ from .serializers import (
     ChildUserPermissionsSerializer, LoginSerializer,
     InviteParentSerializer, FamilyMembersSerializer, DashboardSerializer,
     TaskSerializer, EventSerializer, ShoppingListSerializer, ShoppingItemSerializer,
-    TodoListSerializer, TodoTaskSerializer
+    TodoListSerializer, TodoTaskSerializer, NoteSerializer
 )
 from .permissions import (
     IsParentPermission, IsChildUserPermission, CanManageFamilyPermission,
@@ -790,3 +790,81 @@ class TodoListViewSet(viewsets.ModelViewSet):
         task.save(update_fields=['completed', 'updated_at'])
         serializer = TodoTaskSerializer(task)
         return Response(serializer.data)
+
+
+class NoteViewSet(viewsets.ModelViewSet):
+    """Note management endpoints"""
+    serializer_class = NoteSerializer
+    permission_classes = [IsAuthenticated, FamilyMemberPermission]
+
+    def get_queryset(self):
+        """Return notes for the user's family with proper filtering"""
+        user = self.request.user
+        queryset = Note.objects.filter(family=user.family).select_related(
+            'family', 'created_by', 'updated_by'
+        )
+
+        # Filter by is_shared if provided
+        is_shared = self.request.query_params.get('is_shared', None)
+        if is_shared is not None:
+            is_shared_bool = is_shared.lower() == 'true'
+            queryset = queryset.filter(is_shared=is_shared_bool)
+            
+            # For personal notes, only show notes created by the current user
+            # For shared notes, show all shared notes in the family
+            if not is_shared_bool:
+                queryset = queryset.filter(created_by=user)
+        else:
+            # If no filter provided, show all notes user has access to:
+            # - All shared notes in the family
+            # - Personal notes created by the user
+            queryset = queryset.filter(
+                Q(is_shared=True) | Q(is_shared=False, created_by=user)
+            )
+
+        return queryset.order_by('-updated_at')
+
+    def perform_create(self, serializer):
+        """Create note with family and created_by from request"""
+        serializer.save(
+            family=self.request.user.family,
+            created_by=self.request.user
+        )
+
+    def update(self, request, *args, **kwargs):
+        """Update note with permission check"""
+        instance = self.get_object()
+        
+        # Check permissions:
+        # - Personal notes: only creator can edit
+        # - Shared notes: any family member can edit
+        if not instance.is_shared and instance.created_by != request.user:
+            return Response(
+                {'error': 'You can only edit your own personal notes.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        return super().update(request, *args, **kwargs)
+
+    def perform_update(self, serializer):
+        """Update note and set updated_by"""
+        serializer.save(updated_by=self.request.user)
+
+    def destroy(self, request, *args, **kwargs):
+        """Delete note - Creator can delete own note, parents can delete any note"""
+        instance = self.get_object()
+        
+        # Check permissions: creator can delete own note, parents can delete any note
+        if instance.created_by != request.user and not request.user.is_parent:
+            return Response(
+                {'error': 'You can only delete your own notes.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        return super().destroy(request, *args, **kwargs)
+
+    def get_serializer_context(self):
+        """Add request to serializer context"""
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context

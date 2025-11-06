@@ -557,3 +557,52 @@ class TodoTask(models.Model):
     def __str__(self):
         status = "✓" if self.completed else "○"
         return f"{status} {self.title}"
+
+
+class Note(models.Model):
+    """
+    Notes that can be shared or personal.
+    Multiple notes per family.
+    Rich text content stored as HTML.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    family = models.ForeignKey(
+        Family,
+        on_delete=models.CASCADE,
+        related_name='notes',
+        help_text="The family that owns this note"
+    )
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='created_notes',
+        help_text="User who created this note"
+    )
+    updated_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name='updated_notes',
+        null=True,
+        blank=True,
+        help_text="User who last updated this note"
+    )
+    title = models.CharField(max_length=200, help_text="Title of the note")
+    content = models.TextField(blank=True, help_text="Rich text content (HTML)")
+    is_shared = models.BooleanField(default=False, help_text="Whether the note is shared with family")
+    color = models.CharField(max_length=20, blank=True, default='blue', help_text="Color theme for the note")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Note"
+        verbose_name_plural = "Notes"
+        ordering = ['-updated_at']
+        indexes = [
+            models.Index(fields=['family', 'is_shared']),
+            models.Index(fields=['family', '-updated_at']),
+            models.Index(fields=['created_by']),
+        ]
+
+    def __str__(self):
+        share_status = "Shared" if self.is_shared else "Personal"
+        return f"{self.title} ({share_status})"
