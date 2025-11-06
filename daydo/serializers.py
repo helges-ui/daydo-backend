@@ -352,8 +352,7 @@ class EventSerializer(serializers.ModelSerializer):
         many=True,
         queryset=User.objects.all(),
         write_only=True,
-        required=False,
-        source='assignments.user'
+        required=False
     )
     created_by_name = serializers.CharField(source='created_by.get_display_name', read_only=True)
     
@@ -399,13 +398,8 @@ class EventSerializer(serializers.ModelSerializer):
     
     def update(self, instance, validated_data):
         """Update event and assignments"""
-        # Handle both assigned_to_ids (PrimaryKeyRelatedField) and assigned_to (list of IDs)
+        # Get assigned_user_ids (converted from assigned_to in to_internal_value if needed)
         assigned_user_ids = validated_data.pop('assigned_to_ids', None)
-        assigned_to = validated_data.pop('assigned_to', None)
-        
-        # If assigned_to is provided (list of IDs), convert to User objects
-        if assigned_to is not None and assigned_user_ids is None:
-            assigned_user_ids = User.objects.filter(id__in=assigned_to)
         
         # Update event fields
         for attr, value in validated_data.items():
