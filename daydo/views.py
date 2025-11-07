@@ -4,7 +4,7 @@ These views implement the role-based access control and API endpoints
 defined in the product backlog.
 """
 from rest_framework import viewsets, status, permissions
-from django.db.models import Max, Q
+from django.db.models import Max, Q, OuterRef, Subquery
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -17,16 +17,47 @@ from django.http import JsonResponse
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework.exceptions import ValidationError as DRFValidationError
 
-from .models import User, Family, ChildProfile, ChildUserPermissions, Role, UserRole, Task, Event, EventAssignment, ShoppingList, ShoppingItem, TodoList, TodoTask, Note
+from .models import (
+    User,
+    Family,
+    ChildProfile,
+    ChildUserPermissions,
+    Role,
+    UserRole,
+    Task,
+    Event,
+    EventAssignment,
+    ShoppingList,
+    ShoppingItem,
+    TodoList,
+    TodoTask,
+    Note,
+    Location,
+    SharingStatus,
+)
 from .services.auth_service import AuthService
 from .services.dashboard_service import DashboardService
 from .serializers import (
-    FamilySerializer, UserSerializer, UserRegistrationSerializer,
-    ChildProfileSerializer, ChildProfileCreateSerializer,
-    ChildUserPermissionsSerializer, LoginSerializer,
-    InviteParentSerializer, FamilyMembersSerializer, DashboardSerializer,
-    TaskSerializer, EventSerializer, ShoppingListSerializer, ShoppingItemSerializer,
-    TodoListSerializer, TodoTaskSerializer, NoteSerializer
+    FamilySerializer,
+    UserSerializer,
+    UserRegistrationSerializer,
+    ChildProfileSerializer,
+    ChildProfileCreateSerializer,
+    ChildUserPermissionsSerializer,
+    LoginSerializer,
+    InviteParentSerializer,
+    FamilyMembersSerializer,
+    DashboardSerializer,
+    TaskSerializer,
+    EventSerializer,
+    ShoppingListSerializer,
+    ShoppingItemSerializer,
+    TodoListSerializer,
+    TodoTaskSerializer,
+    NoteSerializer,
+    LocationSerializer,
+    SharingStatusSerializer,
+    FamilyLocationSerializer,
 )
 from .permissions import (
     IsParentPermission, IsChildUserPermission, CanManageFamilyPermission,
@@ -790,6 +821,219 @@ class TodoListViewSet(viewsets.ModelViewSet):
         task.save(update_fields=['completed', 'updated_at'])
         serializer = TodoTaskSerializer(task)
         return Response(serializer.data)
+
+
+class LocationViewSet(viewsets.ViewSet):
+    """Location sharing endpoints"""
+
+    permission_classes = [IsAuthenticated, FamilyMemberPermission]
+
+    DURATION_MAP = {
+        '15m': timedelta(minutes=15),
+        '1h': timedelta(hours=1),
+        '1d': timedelta(days=1),
+    }
+
+    def _get_or_create_sharing_status(self, user):
+        sharing_status, _ = SharingStatus.objects.get_or_create(user=user)
+        return sharing_status
+
+    def _enforce_location_limit(self, user):
+        location_ids = list(
+            Location.objects.filter(sharing_user=user)
+            .order_by('-timestamp')
+            .values_list('id', flat=True)[10:]
+        )
+        if location_ids:
+            Location.objects.filter(id__in=location_ids).delete()
+
+    def _serialize_status(self, status, request):
+        return SharingStatusSerializer(status, context={'request': request}).data
+
+    def _serialize_location(self, location, request):
+        return LocationSerializer(location, context={'request': request}).data
+
+    def _parse_duration(self, duration_str):
+        duration_str = (duration_str or '').lower()
+        if duration_str in self.DURATION_MAP:
+            delta = self.DURATION_MAP[duration_str]
+            return 'temporary', timezone.now() + delta, True
+        if duration_str == 'always':
+            return 'always', None, True
+        if duration_str == 'one-time':
+            return 'one-time', timezone.now(), False
+        return None, None, None
+
+    def _validate_lat_lon(self, request):
+        serializer = LocationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return serializer.validated_data
+
+    @action(detail=False, methods=['post'], url_path='share')
+    def share(self, request):
+        user = request.user
+        sharing_status = self._get_or_create_sharing_status(user)
+
+        duration = request.data.get('duration')
+        sharing_type, expires_at, is_live = self._parse_duration(duration)
+
+        if not sharing_type:
+            return Response(
+                {'error': 'Invalid duration. Use one of: 15m, 1h, 1d, always, one-time.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        created_location = None
+
+        if sharing_type == 'one-time':
+            try:
+                validated = self._validate_lat_lon(request)
+            except DRFValidationError as exc:
+                return Response(exc.detail, status=status.HTTP_400_BAD_REQUEST)
+
+            sharing_status.is_sharing_live = False
+            sharing_status.sharing_type = 'one-time'
+            sharing_status.expires_at = expires_at
+            sharing_status.save(update_fields=['is_sharing_live', 'sharing_type', 'expires_at', 'updated_at'])
+
+            created_location = Location.objects.create(
+                sharing_user=user,
+                latitude=validated['latitude'],
+                longitude=validated['longitude'],
+            )
+        else:
+            sharing_status.is_sharing_live = is_live
+            sharing_status.sharing_type = sharing_type
+            sharing_status.expires_at = expires_at
+            sharing_status.save(update_fields=['is_sharing_live', 'sharing_type', 'expires_at', 'updated_at'])
+
+        response_data = {
+            'status': self._serialize_status(sharing_status, request),
+        }
+
+        if created_location:
+            response_data['location'] = self._serialize_location(created_location, request)
+
+        return Response(response_data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'], url_path='update')
+    def update_location(self, request):
+        user = request.user
+        sharing_status = getattr(user, 'sharing_status', None)
+
+        if not sharing_status or not sharing_status.is_sharing_live:
+            return Response(
+                {'error': 'Location sharing is not active for this user.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if sharing_status.sharing_type == 'temporary' and sharing_status.is_expired():
+            sharing_status.is_sharing_live = False
+            sharing_status.save(update_fields=['is_sharing_live', 'updated_at'])
+            return Response(
+                {'error': 'Location sharing session has expired.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if sharing_status.sharing_type == 'one-time':
+            return Response(
+                {'error': 'Cannot push updates for one-time sharing sessions.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            validated = self._validate_lat_lon(request)
+        except DRFValidationError as exc:
+            return Response(exc.detail, status=status.HTTP_400_BAD_REQUEST)
+
+        location = Location.objects.create(
+            sharing_user=user,
+            latitude=validated['latitude'],
+            longitude=validated['longitude'],
+        )
+
+        self._enforce_location_limit(user)
+
+        return Response(
+            self._serialize_location(location, request),
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=False, methods=['post'], url_path='stop')
+    def stop_sharing(self, request):
+        user = request.user
+        sharing_status = getattr(user, 'sharing_status', None)
+
+        if not sharing_status:
+            sharing_status = SharingStatus.objects.create(user=user)
+
+        if not sharing_status.is_sharing_live and sharing_status.sharing_type != 'temporary':
+            return Response(
+                {'message': 'Location sharing already stopped.'},
+                status=status.HTTP_200_OK,
+            )
+
+        sharing_status.is_sharing_live = False
+        sharing_status.save(update_fields=['is_sharing_live', 'updated_at'])
+
+        return Response(
+            {'status': self._serialize_status(sharing_status, request)},
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=['get'], url_path='family')
+    def family_locations(self, request):
+        user = request.user
+
+        statuses = (
+            SharingStatus.objects.filter(
+                user__family=user.family,
+            )
+            .select_related('user')
+            .filter(Q(is_sharing_live=True) | Q(sharing_type='one-time'))
+        )
+
+        active_ids = []
+        for status_obj in statuses:
+            if status_obj.sharing_type == 'temporary' and status_obj.is_expired():
+                status_obj.is_sharing_live = False
+                status_obj.save(update_fields=['is_sharing_live', 'updated_at'])
+            else:
+                active_ids.append(status_obj.id)
+
+        if not active_ids:
+            return Response([], status=status.HTTP_200_OK)
+
+        latest_location_subquery = Location.objects.filter(
+            sharing_user=OuterRef('user')
+        ).order_by('-timestamp')
+
+        annotated_statuses = (
+            SharingStatus.objects.filter(id__in=active_ids)
+            .select_related('user')
+            .annotate(
+                latest_latitude=Subquery(latest_location_subquery.values('latitude')[:1]),
+                latest_longitude=Subquery(latest_location_subquery.values('longitude')[:1]),
+                latest_timestamp=Subquery(latest_location_subquery.values('timestamp')[:1]),
+            )
+        )
+
+        payload = []
+        for status_obj in annotated_statuses:
+            if status_obj.latest_timestamp is None:
+                continue
+            payload.append({
+                'user_id': status_obj.user.id,
+                'user_name': status_obj.user.get_display_name(),
+                'latitude': status_obj.latest_latitude,
+                'longitude': status_obj.latest_longitude,
+                'timestamp': status_obj.latest_timestamp,
+                'is_sharing_live': status_obj.is_sharing_live,
+                'sharing_type': status_obj.sharing_type,
+            })
+
+        serializer = FamilyLocationSerializer(payload, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class NoteViewSet(viewsets.ModelViewSet):

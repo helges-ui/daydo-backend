@@ -10,7 +10,8 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from .views import (
     AuthenticationViewSet, FamilyViewSet, ChildProfileViewSet,
     ChildUserPermissionsViewSet, UserViewSet, DashboardView, HealthCheckView,
-    TaskViewSet, EventViewSet, ShoppingListViewSet, TodoListViewSet, NoteViewSet
+    TaskViewSet, EventViewSet, ShoppingListViewSet, TodoListViewSet, NoteViewSet,
+    LocationViewSet,
 )
 
 # Create router for ViewSets
@@ -25,6 +26,7 @@ router.register(r'events', EventViewSet, basename='events')
 router.register(r'shopping-lists', ShoppingListViewSet, basename='shopping-lists')
 router.register(r'todo-lists', TodoListViewSet, basename='todo-lists')
 router.register(r'notes', NoteViewSet, basename='notes')
+router.register(r'location', LocationViewSet, basename='location')
 
 app_name = 'daydo'
 

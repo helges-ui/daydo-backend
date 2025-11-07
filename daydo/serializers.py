@@ -8,7 +8,24 @@ from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.db.models import Max
-from .models import User, Family, ChildProfile, ChildUserPermissions, UserRole, Role, Task, Event, EventAssignment, ShoppingList, ShoppingItem, TodoList, TodoTask, Note
+from .models import (
+    User,
+    Family,
+    ChildProfile,
+    ChildUserPermissions,
+    UserRole,
+    Role,
+    Task,
+    Event,
+    EventAssignment,
+    ShoppingList,
+    ShoppingItem,
+    TodoList,
+    TodoTask,
+    Note,
+    Location,
+    SharingStatus,
+)
 
 
 class FamilySerializer(serializers.ModelSerializer):
@@ -551,3 +568,72 @@ class NoteSerializer(serializers.ModelSerializer):
         if request and request.user:
             validated_data['updated_by'] = request.user
         return super().update(instance, validated_data)
+
+
+class LocationSerializer(serializers.ModelSerializer):
+    """Serializer for Location model"""
+
+    sharing_user_name = serializers.CharField(source='sharing_user.get_display_name', read_only=True)
+    sharing_user_id = serializers.UUIDField(source='sharing_user.id', read_only=True)
+
+    class Meta:
+        model = Location
+        fields = [
+            'id',
+            'sharing_user',
+            'sharing_user_id',
+            'sharing_user_name',
+            'latitude',
+            'longitude',
+            'timestamp',
+        ]
+        read_only_fields = ['id', 'sharing_user', 'timestamp']
+
+    def validate_latitude(self, value):
+        if value < -90 or value > 90:
+            raise serializers.ValidationError('Latitude must be between -90 and 90 degrees.')
+        return value
+
+    def validate_longitude(self, value):
+        if value < -180 or value > 180:
+            raise serializers.ValidationError('Longitude must be between -180 and 180 degrees.')
+        return value
+
+
+class SharingStatusSerializer(serializers.ModelSerializer):
+    """Serializer for SharingStatus model"""
+
+    user_name = serializers.CharField(source='user.get_display_name', read_only=True)
+    user_id = serializers.UUIDField(source='user.id', read_only=True)
+    is_expired = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SharingStatus
+        fields = [
+            'id',
+            'user',
+            'user_id',
+            'user_name',
+            'is_sharing_live',
+            'sharing_type',
+            'expires_at',
+            'started_at',
+            'updated_at',
+            'is_expired',
+        ]
+        read_only_fields = ['id', 'user', 'started_at', 'updated_at']
+
+    def get_is_expired(self, obj):
+        return obj.is_expired()
+
+
+class FamilyLocationSerializer(serializers.Serializer):
+    """Serializer for family members' latest locations."""
+
+    user_id = serializers.UUIDField()
+    user_name = serializers.CharField()
+    latitude = serializers.DecimalField(max_digits=9, decimal_places=6)
+    longitude = serializers.DecimalField(max_digits=9, decimal_places=6)
+    timestamp = serializers.DateTimeField()
+    is_sharing_live = serializers.BooleanField()
+    sharing_type = serializers.CharField()

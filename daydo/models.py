@@ -4,6 +4,7 @@ from django.contrib.auth.models import AbstractUser
 from django.db import models
 from django.core.validators import RegexValidator
 from django.core.exceptions import ValidationError
+from django.utils import timezone
 
 
 def validate_hex_color(value):
@@ -362,7 +363,6 @@ class Task(models.Model):
 
     def mark_completed(self):
         """Mark task as completed"""
-        from django.utils import timezone
         self.completed = True
         self.completed_at = timezone.now()
         self.save(update_fields=['completed', 'completed_at', 'updated_at'])
@@ -557,6 +557,102 @@ class TodoTask(models.Model):
     def __str__(self):
         status = "✓" if self.completed else "○"
         return f"{status} {self.title}"
+
+
+class Location(models.Model):
+    """
+    Stores location data for users sharing their position.
+    Tracks the last 10 positions per user (oldest auto-deleted).
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    sharing_user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='locations',
+        help_text="User who is sharing their location"
+    )
+    latitude = models.DecimalField(
+        max_digits=9,
+        decimal_places=6,
+        help_text="Latitude coordinate (-90 to 90)"
+    )
+    longitude = models.DecimalField(
+        max_digits=9,
+        decimal_places=6,
+        help_text="Longitude coordinate (-180 to 180)"
+    )
+    timestamp = models.DateTimeField(
+        auto_now_add=True,
+        help_text="When this location was recorded"
+    )
+
+    class Meta:
+        verbose_name = "Location"
+        verbose_name_plural = "Locations"
+        ordering = ['-timestamp']
+        indexes = [
+            models.Index(fields=['sharing_user', '-timestamp']),
+            models.Index(fields=['sharing_user', 'timestamp']),
+        ]
+
+    def __str__(self):
+        return f"{self.sharing_user.get_display_name()} @ {self.latitude}, {self.longitude}"
+
+
+class SharingStatus(models.Model):
+    """Tracks the active sharing status for each user."""
+
+    SHARING_TYPE_CHOICES = [
+        ('one-time', 'One-Time'),
+        ('temporary', 'Temporary'),
+        ('always', 'Always'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name='sharing_status',
+        help_text="User whose sharing status this is"
+    )
+    is_sharing_live = models.BooleanField(
+        default=False,
+        help_text="Whether location sharing is currently active"
+    )
+    sharing_type = models.CharField(
+        max_length=20,
+        choices=SHARING_TYPE_CHOICES,
+        default='one-time',
+        help_text="Type of sharing: one-time, temporary, or always"
+    )
+    expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When temporary sharing expires (null for always/one-time)"
+    )
+    started_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="When sharing was started"
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Sharing Status"
+        verbose_name_plural = "Sharing Statuses"
+        indexes = [
+            models.Index(fields=['user', 'is_sharing_live']),
+            models.Index(fields=['expires_at']),
+        ]
+
+    def __str__(self):
+        status = "Active" if self.is_sharing_live else "Inactive"
+        return f"{self.user.get_display_name()} - {status} ({self.sharing_type})"
+
+    def is_expired(self):
+        """Check if temporary sharing has expired."""
+        if self.sharing_type == 'temporary' and self.expires_at:
+            return timezone.now() > self.expires_at
+        return False
 
 
 class Note(models.Model):
