@@ -984,52 +984,58 @@ class LocationViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['get'], url_path='family')
     def family_locations(self, request):
         user = request.user
-
-        statuses = (
-            SharingStatus.objects.filter(
-                user__family=user.family,
-            )
-            .select_related('user')
-            .filter(Q(is_sharing_live=True) | Q(sharing_type='one-time'))
-        )
-
-        active_ids = []
-        for status_obj in statuses:
-            if status_obj.sharing_type == 'temporary' and status_obj.is_expired():
-                status_obj.is_sharing_live = False
-                status_obj.save(update_fields=['is_sharing_live', 'updated_at'])
-            else:
-                active_ids.append(status_obj.id)
-
-        if not active_ids:
-            return Response([], status=status.HTTP_200_OK)
+        family_members = user.family.members.select_related('sharing_status')
 
         latest_location_subquery = Location.objects.filter(
-            sharing_user=OuterRef('user')
+            sharing_user=OuterRef('pk')
         ).order_by('-timestamp')
 
-        annotated_statuses = (
-            SharingStatus.objects.filter(id__in=active_ids)
-            .select_related('user')
-            .annotate(
-                latest_latitude=Subquery(latest_location_subquery.values('latitude')[:1]),
-                latest_longitude=Subquery(latest_location_subquery.values('longitude')[:1]),
-                latest_timestamp=Subquery(latest_location_subquery.values('timestamp')[:1]),
-            )
+        annotated_members = family_members.annotate(
+            latest_latitude=Subquery(latest_location_subquery.values('latitude')[:1]),
+            latest_longitude=Subquery(latest_location_subquery.values('longitude')[:1]),
+            latest_timestamp=Subquery(latest_location_subquery.values('timestamp')[:1]),
         )
 
         payload = []
-        for status_obj in annotated_statuses:
-            if status_obj.latest_timestamp is None:
-                continue
+        for member in annotated_members:
+            sharing_status = getattr(member, 'sharing_status', None)
+
+            is_sharing_live = False
+            sharing_type = None
+            expires_at = None
+            started_at = None
+            updated_at = None
+
+            if sharing_status:
+                if sharing_status.sharing_type == 'temporary' and sharing_status.is_expired():
+                    if sharing_status.is_sharing_live:
+                        sharing_status.is_sharing_live = False
+                        sharing_status.save(update_fields=['is_sharing_live', 'updated_at'])
+                    is_sharing_live = False
+                else:
+                    is_sharing_live = sharing_status.is_sharing_live
+                    sharing_type = sharing_status.sharing_type
+                    expires_at = sharing_status.expires_at
+                    started_at = sharing_status.started_at
+                    updated_at = sharing_status.updated_at
+
+                if sharing_status.sharing_type == 'one-time':
+                    # one-time shares are not live after first share
+                    is_sharing_live = False
+
             payload.append({
-                'user_id': status_obj.user.id,
-                'user_name': status_obj.user.get_display_name(),
-                'latitude': status_obj.latest_latitude,
-                'longitude': status_obj.latest_longitude,
-                'timestamp': status_obj.latest_timestamp,
-                'is_sharing_live': status_obj.is_sharing_live,
-                'sharing_type': status_obj.sharing_type,
+                'user_id': member.id,
+                'user_name': member.get_display_name(),
+                'user_avatar': member.avatar,
+                'user_color': member.color,
+                'latitude': getattr(member, 'latest_latitude', None),
+                'longitude': getattr(member, 'latest_longitude', None),
+                'timestamp': getattr(member, 'latest_timestamp', None),
+                'is_sharing_live': is_sharing_live,
+                'sharing_type': sharing_type,
+                'expires_at': expires_at,
+                'started_at': started_at,
+                'updated_at': updated_at,
             })
 
         serializer = FamilyLocationSerializer(payload, many=True)
