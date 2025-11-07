@@ -1,7 +1,7 @@
 # Location Sharing Feature - Implementation Plan
 
 ## Overview
-This document outlines the implementation plan for the "Share Position" feature (US-31 to US-39) in the DayDo Family App backend. The feature allows family members to share their location with the family for safety and coordination purposes.
+This document outlines the implementation plan for the "Share Position" feature (US-31 to US-39) in the DayDo Family App backend, with forward-looking considerations for US-44 and US-45. The feature allows family members to share their location with the family for safety and coordination purposes.
 
 ## Analysis Summary
 
@@ -15,7 +15,8 @@ This document outlines the implementation plan for the "Share Position" feature 
 - **US-37**: Display timestamp with position
 - **US-38**: Manual stop sharing
 - **US-39**: Permission prompts (frontend responsibility)
-- **US-44**: Live map view (future - not in scope)
+- **US-44**: Live map view (future - not in scope for current iteration)
+- **US-45**: Radius-based naming of locations (future - data model must support)
 
 ### Technical Requirements
 1. **Data Models**: Location and SharingStatus models
@@ -24,6 +25,7 @@ This document outlines the implementation plan for the "Share Position" feature 
 4. **Data Management**: Auto-delete oldest records when >10 per user
 5. **Background Tasks**: Auto-expire temporary sharing sessions
 6. **Security**: Family-scoped access, authentication required
+7. **Future Readiness**: Data model extensibility for named geofenced zones (US-45)
 
 ---
 
@@ -75,6 +77,7 @@ class Location(models.Model):
 - Auto-generated `timestamp` on creation
 - Indexed on `sharing_user` and `timestamp` for efficient queries
 - Cascade delete when user is deleted
+- Future-ready for geofence lookups (US-45) by keeping raw coordinates per sample
 
 ### 1.2 SharingStatus Model
 **File**: `daydo/models.py`
@@ -136,13 +139,31 @@ class SharingStatus(models.Model):
         if self.sharing_type == 'temporary' and self.expires_at:
             return timezone.now() > self.expires_at
         return False
+
+### 1.3 (Future) LocationAnchor Model (US-45)
+> _Deferred to a later phase; documented here to keep the database design future-proof._
+
+US-45 requires storing named places (e.g., "Home", "School") with a radius. The current iteration will not implement the model, but we plan to introduce:
+
+```python
+class LocationAnchor(models.Model):
+    """Named geofence/anchor for a family."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    family = models.ForeignKey(Family, on_delete=models.CASCADE, related_name='location_anchors')
+    name = models.CharField(max_length=100)
+    latitude = models.DecimalField(max_digits=9, decimal_places=6)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6)
+    radius_meters = models.PositiveIntegerField(default=100)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='created_anchors')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    class Meta:
+        unique_together = ('family', 'name')
 ```
 
-**Key Points**:
-- One-to-One with User ensures one status per user
-- `expires_at` nullable for always/one-time sharing
-- Index on `expires_at` for efficient background task queries
-- Helper method `is_expired()` for expiration checks
+**Rationale**:
+- By documenting the future model now, we ensure current migrations leave room for easy addition later.
+- The `Location` model already stores raw coordinates allowing future calculations (point-in-radius checks) without schema changes.
 
 ---
 
@@ -529,7 +550,16 @@ class Command(BaseCommand):
 - Cache family locations for 30-60 seconds
 - Invalidate on location update
 
----
+## Future Extensions (US-44 & US-45)
+Although out of scope for the current implementation, we are intentionally preparing for:
+
+- **US-44 (Live Map View)**: The existing endpoints already provide the most recent positions per user. A future WebSocket or polling-based endpoint can stream updates without changing the persistence layer.
+- **US-45 (Radius-based Naming)**: The proposed `LocationAnchor` model will allow the backend to resolve raw GPS coordinates into semantic labels ("Home", "School"). Future logic will:
+  - Determine if the latest location is within `radius_meters` of an anchor
+  - Return the anchor name to the frontend in addition to raw coordinates
+  - Support multiple anchors per family with uniqueness constraints (name + family)
+
+Keeping these extensions in mind ensures that the current database schema and APIs remain forward-compatible.
 
 ## Implementation Order
 
@@ -575,6 +605,9 @@ class Command(BaseCommand):
 
 5. **Always-on sharing**: Should there be a maximum duration even for "always"?
    - **Decision**: No maximum, but user can manually stop anytime
+
+6. **Anchor naming and radius defaults (US-45)**: What default radius and naming conventions should we adopt for geofenced anchors?
+   - **Decision**: Default to 100 meters and allow families to override; enforce unique names per family.
 
 ---
 
