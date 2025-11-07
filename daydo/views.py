@@ -985,6 +985,7 @@ class LocationViewSet(viewsets.ViewSet):
     def family_locations(self, request):
         user = request.user
         family_members = user.family.members.select_related('sharing_status')
+        child_profiles = user.family.child_profiles.select_related('linked_user', 'linked_user__sharing_status')
 
         latest_location_subquery = Location.objects.filter(
             sharing_user=OuterRef('pk')
@@ -997,7 +998,11 @@ class LocationViewSet(viewsets.ViewSet):
         )
 
         payload = []
+
         for member in annotated_members:
+            if member.role == 'CHILD_USER':
+                continue
+
             sharing_status = getattr(member, 'sharing_status', None)
 
             is_sharing_live = False
@@ -1020,17 +1025,64 @@ class LocationViewSet(viewsets.ViewSet):
                     updated_at = sharing_status.updated_at
 
                 if sharing_status.sharing_type == 'one-time':
-                    # one-time shares are not live after first share
                     is_sharing_live = False
 
             payload.append({
-                'user_id': member.id,
+                'user_id': str(member.id),
                 'user_name': member.get_display_name(),
                 'user_avatar': member.avatar,
                 'user_color': member.color,
                 'latitude': getattr(member, 'latest_latitude', None),
                 'longitude': getattr(member, 'latest_longitude', None),
                 'timestamp': getattr(member, 'latest_timestamp', None),
+                'is_sharing_live': is_sharing_live,
+                'sharing_type': sharing_type,
+                'expires_at': expires_at,
+                'started_at': started_at,
+                'updated_at': updated_at,
+            })
+
+        for child in child_profiles:
+            linked_user = child.linked_user
+            latest_location = None
+            is_sharing_live = False
+            sharing_type = None
+            expires_at = None
+            started_at = None
+            updated_at = None
+
+            if linked_user:
+                latest_location = (
+                    Location.objects.filter(sharing_user=linked_user)
+                    .order_by('-timestamp')
+                    .first()
+                )
+                sharing_status = getattr(linked_user, 'sharing_status', None)
+
+                if sharing_status:
+                    if sharing_status.sharing_type == 'temporary' and sharing_status.is_expired():
+                        if sharing_status.is_sharing_live:
+                            sharing_status.is_sharing_live = False
+                            sharing_status.save(update_fields=['is_sharing_live', 'updated_at'])
+                        is_sharing_live = False
+                    else:
+                        is_sharing_live = sharing_status.is_sharing_live
+                        sharing_type = sharing_status.sharing_type
+                        expires_at = sharing_status.expires_at
+                        started_at = sharing_status.started_at
+                        updated_at = sharing_status.updated_at
+
+                    if sharing_status.sharing_type == 'one-time':
+                        is_sharing_live = False
+
+            payload.append({
+                'user_id': str(child.id),
+                'user_name': child.full_name or child.first_name,
+                'user_avatar': child.avatar,
+                'user_color': child.color,
+                'latitude': latest_location.latitude if latest_location else None,
+                'longitude': latest_location.longitude if latest_location else None,
+                'timestamp': latest_location.timestamp if latest_location else None,
                 'is_sharing_live': is_sharing_live,
                 'sharing_type': sharing_type,
                 'expires_at': expires_at,

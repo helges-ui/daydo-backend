@@ -630,7 +630,7 @@ class SharingStatusSerializer(serializers.ModelSerializer):
 class FamilyLocationSerializer(serializers.Serializer):
     """Serializer for family members' latest locations."""
 
-    user_id = serializers.UUIDField()
+    user_id = serializers.CharField()
     user_name = serializers.CharField()
     user_avatar = serializers.CharField(allow_null=True, required=False)
     user_color = serializers.CharField(allow_null=True, required=False)
