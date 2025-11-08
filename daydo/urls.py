@@ -11,7 +11,7 @@ from .views import (
     AuthenticationViewSet, FamilyViewSet, ChildProfileViewSet,
     ChildUserPermissionsViewSet, UserViewSet, DashboardView, HealthCheckView,
     TaskViewSet, EventViewSet, ShoppingListViewSet, TodoListViewSet, NoteViewSet,
-    LocationViewSet,
+    LocationViewSet, GeofenceViewSet,
 )
 
 # Create router for ViewSets
