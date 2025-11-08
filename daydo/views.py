@@ -945,9 +945,6 @@ class LocationViewSet(viewsets.ViewSet):
     def _serialize_location(self, location, request):
         return LocationSerializer(location, context={'request': request}).data
 
-    def _serialize_geofence(self, geofence, request):
-        return GeofenceSerializer(geofence, context={'request': request}).data
-
     def _parse_duration(self, duration_str):
         duration_str = (duration_str or '').lower()
         if duration_str in self.DURATION_MAP:
@@ -963,46 +960,6 @@ class LocationViewSet(viewsets.ViewSet):
         serializer = LocationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         return serializer.validated_data
-
-    @action(detail=False, methods=['get', 'post'], url_path='geofences')
-    def geofences(self, request):
-        if request.method.lower() == 'get':
-            geofences = Geofence.objects.filter(family=request.user.family).order_by('name')
-            data = GeofenceSerializer(geofences, many=True, context={'request': request}).data
-            return Response(data, status=status.HTTP_200_OK)
-
-        # POST -> create geofence
-        if not request.user.is_parent:
-            return Response(
-                {'error': 'Only parents can create geofences.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        serializer = GeofenceSerializer(data=request.data, context={'request': request})
-        if serializer.is_valid():
-            geofence = serializer.save()
-            return Response(
-                self._serialize_geofence(geofence, request),
-                status=status.HTTP_201_CREATED,
-            )
-
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-    @action(detail=False, methods=['delete'], url_path=r'geofences/(?P<geofence_id>[^/.]+)')
-    def delete_geofence(self, request, geofence_id=None):
-        if not request.user.is_parent:
-            return Response(
-                {'error': 'Only parents can delete geofences.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        geofence = get_object_or_404(
-            Geofence,
-            id=geofence_id,
-            family=request.user.family,
-        )
-        geofence.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=False, methods=['post'], url_path='share')
     def share(self, request):
