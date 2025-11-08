@@ -939,6 +939,48 @@ class LocationViewSet(viewsets.ViewSet):
 
         return None
 
+    @action(detail=False, methods=['get'], url_path='geofences', url_name='legacy-geofence-list')
+    def legacy_list_geofences(self, request):
+        """
+        Backward compatibility endpoint for legacy clients still calling /api/location/geofences/.
+        """
+        geofences = Geofence.objects.filter(family=request.user.family).order_by('name')
+        serializer = GeofenceSerializer(geofences, many=True, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @legacy_list_geofences.mapping.post
+    def legacy_create_geofence(self, request):
+        """
+        Backward compatibility endpoint for creating a geofence via /api/location/geofences/.
+        """
+        if not request.user.is_parent:
+            return Response(
+                {'error': 'Only parents can create geofences.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        serializer = GeofenceSerializer(data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        geofence = serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['delete'], url_path=r'geofences/(?P<geofence_id>[^/.]+)', url_name='legacy-geofence-delete')
+    def legacy_delete_geofence(self, request, geofence_id=None):
+        """
+        Backward compatibility endpoint for deleting a geofence via /api/location/geofences/<id>/.
+        """
+        if not request.user.is_parent:
+            return Response(
+                {'error': 'Only parents can delete geofences.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        geofence = get_object_or_404(
+            Geofence,
+            id=geofence_id,
+            family=request.user.family,
+        )
+        geofence.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
     def _serialize_status(self, status, request):
         return SharingStatusSerializer(status, context={'request': request}).data
 
