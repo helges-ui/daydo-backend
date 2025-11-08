@@ -924,14 +924,14 @@ class LocationViewSet(viewsets.ViewSet):
         serializer.is_valid(raise_exception=True)
         return serializer.validated_data
 
-    @action(detail=False, methods=['get'], url_path='geofences')
-    def list_geofences(self, request):
-        geofences = Geofence.objects.filter(family=request.user.family).order_by('name')
-        data = GeofenceSerializer(geofences, many=True, context={'request': request}).data
-        return Response(data, status=status.HTTP_200_OK)
+    @action(detail=False, methods=['get', 'post'], url_path='geofences')
+    def geofences(self, request):
+        if request.method.lower() == 'get':
+            geofences = Geofence.objects.filter(family=request.user.family).order_by('name')
+            data = GeofenceSerializer(geofences, many=True, context={'request': request}).data
+            return Response(data, status=status.HTTP_200_OK)
 
-    @action(detail=False, methods=['post'], url_path='geofences')
-    def create_geofence(self, request):
+        # POST -> create geofence
         if not request.user.is_parent:
             return Response(
                 {'error': 'Only parents can create geofences.'},
