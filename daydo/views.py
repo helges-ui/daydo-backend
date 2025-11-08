@@ -3,6 +3,8 @@ Views for DayDo API endpoints.
 These views implement the role-based access control and API endpoints
 defined in the product backlog.
 """
+import math
+
 from rest_framework import viewsets, status, permissions
 from django.db.models import Max, Q, OuterRef, Subquery
 from rest_framework.decorators import action
@@ -34,6 +36,7 @@ from .models import (
     Note,
     Location,
     SharingStatus,
+    Geofence,
 )
 from .services.auth_service import AuthService
 from .services.dashboard_service import DashboardService
@@ -58,6 +61,7 @@ from .serializers import (
     LocationSerializer,
     SharingStatusSerializer,
     FamilyLocationSerializer,
+    GeofenceSerializer,
 )
 from .permissions import (
     IsParentPermission, IsChildUserPermission, CanManageFamilyPermission,
@@ -847,11 +851,62 @@ class LocationViewSet(viewsets.ViewSet):
         if location_ids:
             Location.objects.filter(id__in=location_ids).delete()
 
+    def _get_family_geofences(self, family):
+        return list(
+            Geofence.objects.filter(family=family).order_by('name')
+        )
+
+    @staticmethod
+    def _haversine_distance_meters(lat1, lon1, lat2, lon2):
+        """
+        Calculate the great-circle distance between two points on the Earth (in meters).
+        """
+        radius = 6371000  # Earth radius in meters
+        phi1 = math.radians(lat1)
+        phi2 = math.radians(lat2)
+        delta_phi = math.radians(lat2 - lat1)
+        delta_lambda = math.radians(lon2 - lon1)
+
+        a = math.sin(delta_phi / 2) ** 2 + \
+            math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+        return radius * c
+
+    def _match_geofence(self, latitude, longitude, geofences):
+        """
+        Return the first geofence whose radius contains the provided lat/lon.
+        """
+        if latitude is None or longitude is None:
+            return None
+
+        try:
+            lat = float(latitude)
+            lon = float(longitude)
+        except (TypeError, ValueError):
+            return None
+
+        for geofence in geofences:
+            try:
+                fence_lat = float(geofence.latitude)
+                fence_lon = float(geofence.longitude)
+            except (TypeError, ValueError):
+                continue
+
+            distance = self._haversine_distance_meters(lat, lon, fence_lat, fence_lon)
+            if distance <= geofence.radius:
+                return geofence
+
+        return None
+
     def _serialize_status(self, status, request):
         return SharingStatusSerializer(status, context={'request': request}).data
 
     def _serialize_location(self, location, request):
         return LocationSerializer(location, context={'request': request}).data
+
+    def _serialize_geofence(self, geofence, request):
+        return GeofenceSerializer(geofence, context={'request': request}).data
 
     def _parse_duration(self, duration_str):
         duration_str = (duration_str or '').lower()
@@ -868,6 +923,46 @@ class LocationViewSet(viewsets.ViewSet):
         serializer = LocationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         return serializer.validated_data
+
+    @action(detail=False, methods=['get'], url_path='geofences')
+    def list_geofences(self, request):
+        geofences = Geofence.objects.filter(family=request.user.family).order_by('name')
+        data = GeofenceSerializer(geofences, many=True, context={'request': request}).data
+        return Response(data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'], url_path='geofences')
+    def create_geofence(self, request):
+        if not request.user.is_parent:
+            return Response(
+                {'error': 'Only parents can create geofences.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = GeofenceSerializer(data=request.data, context={'request': request})
+        if serializer.is_valid():
+            geofence = serializer.save()
+            return Response(
+                self._serialize_geofence(geofence, request),
+                status=status.HTTP_201_CREATED,
+            )
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['delete'], url_path=r'geofences/(?P<geofence_id>[^/.]+)')
+    def delete_geofence(self, request, geofence_id=None):
+        if not request.user.is_parent:
+            return Response(
+                {'error': 'Only parents can delete geofences.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        geofence = get_object_or_404(
+            Geofence,
+            id=geofence_id,
+            family=request.user.family,
+        )
+        geofence.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=False, methods=['post'], url_path='share')
     def share(self, request):
@@ -986,6 +1081,7 @@ class LocationViewSet(viewsets.ViewSet):
         user = request.user
         family_members = user.family.members.select_related('sharing_status')
         child_profiles = user.family.child_profiles.select_related('linked_user', 'linked_user__sharing_status')
+        geofences = self._get_family_geofences(user.family)
 
         latest_location_subquery = Location.objects.filter(
             sharing_user=OuterRef('pk')
@@ -1027,14 +1123,34 @@ class LocationViewSet(viewsets.ViewSet):
                 if sharing_status.sharing_type == 'one-time':
                     is_sharing_live = False
 
+            latitude_value = getattr(member, 'latest_latitude', None)
+            longitude_value = getattr(member, 'latest_longitude', None)
+            geofence_match = self._match_geofence(latitude_value, longitude_value, geofences)
+
+            if geofence_match:
+                location_label = geofence_match.name
+                geofence_id = str(geofence_match.id)
+                within_geofence = True
+                latitude_payload = None
+                longitude_payload = None
+            else:
+                location_label = None
+                geofence_id = None
+                within_geofence = False
+                latitude_payload = latitude_value
+                longitude_payload = longitude_value
+
             payload.append({
                 'user_id': str(member.id),
                 'user_name': member.get_display_name(),
                 'user_avatar': member.avatar,
                 'user_color': member.color,
-                'latitude': getattr(member, 'latest_latitude', None),
-                'longitude': getattr(member, 'latest_longitude', None),
+                'latitude': latitude_payload,
+                'longitude': longitude_payload,
                 'timestamp': getattr(member, 'latest_timestamp', None),
+                'location_label': location_label,
+                'geofence_id': geofence_id,
+                'within_geofence': within_geofence,
                 'is_sharing_live': is_sharing_live,
                 'sharing_type': sharing_type,
                 'expires_at': expires_at,
@@ -1075,14 +1191,41 @@ class LocationViewSet(viewsets.ViewSet):
                     if sharing_status.sharing_type == 'one-time':
                         is_sharing_live = False
 
+            if latest_location:
+                latitude_value = latest_location.latitude
+                longitude_value = latest_location.longitude
+                timestamp_value = latest_location.timestamp
+            else:
+                latitude_value = None
+                longitude_value = None
+                timestamp_value = None
+
+            geofence_match = self._match_geofence(latitude_value, longitude_value, geofences)
+
+            if geofence_match:
+                location_label = geofence_match.name
+                geofence_id = str(geofence_match.id)
+                within_geofence = True
+                latitude_payload = None
+                longitude_payload = None
+            else:
+                location_label = None
+                geofence_id = None
+                within_geofence = False
+                latitude_payload = latitude_value
+                longitude_payload = longitude_value
+
             payload.append({
                 'user_id': str(child.id),
                 'user_name': child.full_name or child.first_name,
                 'user_avatar': child.avatar,
                 'user_color': child.color,
-                'latitude': latest_location.latitude if latest_location else None,
-                'longitude': latest_location.longitude if latest_location else None,
-                'timestamp': latest_location.timestamp if latest_location else None,
+                'latitude': latitude_payload,
+                'longitude': longitude_payload,
+                'timestamp': timestamp_value,
+                'location_label': location_label,
+                'geofence_id': geofence_id,
+                'within_geofence': within_geofence,
                 'is_sharing_live': is_sharing_live,
                 'sharing_type': sharing_type,
                 'expires_at': expires_at,

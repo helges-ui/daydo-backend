@@ -655,6 +655,66 @@ class SharingStatus(models.Model):
         return False
 
 
+class Geofence(models.Model):
+    """
+    Represents a named geofence around a fixed coordinate for a family.
+    Radius is fixed at 50 meters per product requirements.
+    """
+
+    DEFAULT_RADIUS_METERS = 50
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    family = models.ForeignKey(
+        Family,
+        on_delete=models.CASCADE,
+        related_name='geofences',
+        help_text="Family that owns this geofence"
+    )
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_geofences',
+        help_text="User who created this geofence"
+    )
+    name = models.CharField(max_length=100, help_text="Display name of the geofence")
+    latitude = models.DecimalField(
+        max_digits=9,
+        decimal_places=6,
+        help_text="Latitude coordinate (-90 to 90)"
+    )
+    longitude = models.DecimalField(
+        max_digits=9,
+        decimal_places=6,
+        help_text="Longitude coordinate (-180 to 180)"
+    )
+    radius = models.PositiveIntegerField(
+        default=DEFAULT_RADIUS_METERS,
+        editable=False,
+        help_text="Radius in meters (fixed to 50m)"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Geofence"
+        verbose_name_plural = "Geofences"
+        ordering = ['name']
+        indexes = [
+            models.Index(fields=['family', 'name']),
+        ]
+        unique_together = [('family', 'name')]
+
+    def __str__(self):
+        return f"{self.name} ({self.family.name})"
+
+    def save(self, *args, **kwargs):
+        # Enforce fixed radius regardless of incoming data
+        self.radius = self.DEFAULT_RADIUS_METERS
+        super().save(*args, **kwargs)
+
+
 class Note(models.Model):
     """
     Notes that can be shared or personal.

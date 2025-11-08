@@ -25,6 +25,7 @@ from .models import (
     Note,
     Location,
     SharingStatus,
+    Geofence,
 )
 
 
@@ -570,6 +571,62 @@ class NoteSerializer(serializers.ModelSerializer):
         return super().update(instance, validated_data)
 
 
+class GeofenceSerializer(serializers.ModelSerializer):
+    """Serializer for Geofence model"""
+
+    created_by_name = serializers.CharField(source='created_by.get_display_name', read_only=True)
+    user = serializers.UUIDField(source='created_by_id', read_only=True)
+
+    class Meta:
+        model = Geofence
+        fields = [
+            'id',
+            'family',
+            'created_by',
+            'user',
+            'created_by_name',
+            'name',
+            'latitude',
+            'longitude',
+            'radius',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = [
+            'id',
+            'family',
+            'created_by',
+            'user',
+            'created_by_name',
+            'radius',
+            'created_at',
+            'updated_at',
+        ]
+
+    def validate_latitude(self, value):
+        if value < -90 or value > 90:
+            raise serializers.ValidationError('Latitude must be between -90 and 90 degrees.')
+        return value
+
+    def validate_longitude(self, value):
+        if value < -180 or value > 180:
+            raise serializers.ValidationError('Longitude must be between -180 and 180 degrees.')
+        return value
+
+    def create(self, validated_data):
+        request = self.context.get('request')
+        if request and request.user:
+            validated_data['family'] = request.user.family
+            validated_data['created_by'] = request.user
+        # Ensure radius remains fixed at model default
+        validated_data.pop('radius', None)
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        # Disallow updates for now; geofences are immutable aside from delete
+        raise serializers.ValidationError('Geofences cannot be updated. Delete and recreate instead.')
+
+
 class LocationSerializer(serializers.ModelSerializer):
     """Serializer for Location model"""
 
@@ -637,6 +694,9 @@ class FamilyLocationSerializer(serializers.Serializer):
     latitude = serializers.DecimalField(max_digits=9, decimal_places=6, required=False, allow_null=True)
     longitude = serializers.DecimalField(max_digits=9, decimal_places=6, required=False, allow_null=True)
     timestamp = serializers.DateTimeField(required=False, allow_null=True)
+    location_label = serializers.CharField(allow_null=True, required=False)
+    geofence_id = serializers.UUIDField(allow_null=True, required=False)
+    within_geofence = serializers.BooleanField(default=False)
     is_sharing_live = serializers.BooleanField()
     sharing_type = serializers.CharField(allow_null=True, required=False)
     expires_at = serializers.DateTimeField(allow_null=True, required=False)

@@ -9,7 +9,7 @@ import uuid
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('daydo', '0004_shoppinglist_shoppingitem'),
+        ('daydo', '0005_todolist_todotask'),
     ]
 
     operations = [
