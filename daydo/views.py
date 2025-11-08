@@ -827,6 +827,46 @@ class TodoListViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
 
+class GeofenceViewSet(viewsets.ModelViewSet):
+    """CRUD for geofences scoped to the authenticated user's family."""
+
+    serializer_class = GeofenceSerializer
+    permission_classes = [IsAuthenticated, FamilyMemberPermission]
+    queryset = Geofence.objects.all()
+
+    def get_queryset(self):
+        return Geofence.objects.filter(family=self.request.user.family).order_by('name')
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
+    def create(self, request, *args, **kwargs):
+        if not request.user.is_parent:
+            return Response(
+                {'error': 'Only parents can create geofences.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        geofence = serializer.save()
+        headers = self.get_success_headers(serializer.data)
+        return Response(
+            self.get_serializer(geofence).data,
+            status=status.HTTP_201_CREATED,
+            headers=headers,
+        )
+
+    def destroy(self, request, *args, **kwargs):
+        if not request.user.is_parent:
+            return Response(
+                {'error': 'Only parents can delete geofences.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return super().destroy(request, *args, **kwargs)
+
+
 class LocationViewSet(viewsets.ViewSet):
     """Location sharing endpoints"""
 
