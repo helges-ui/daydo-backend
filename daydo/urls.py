@@ -27,6 +27,7 @@ router.register(r'shopping-lists', ShoppingListViewSet, basename='shopping-lists
 router.register(r'todo-lists', TodoListViewSet, basename='todo-lists')
 router.register(r'notes', NoteViewSet, basename='notes')
 router.register(r'location', LocationViewSet, basename='location')
+router.register(r'geofences', GeofenceViewSet, basename='geofence')
 
 app_name = 'daydo'
 
