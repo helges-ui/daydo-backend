@@ -602,6 +602,32 @@ class TaskViewSet(viewsets.ModelViewSet):
             created_by=self.request.user
         )
     
+    @staticmethod
+    def _adjust_star_count(user, delta: int):
+        """Increment or decrement the child's star count, ensuring it never goes below zero."""
+        if not user or delta == 0:
+            return
+
+        # Only adjust for child accounts
+        is_child = False
+        if hasattr(user, 'is_child_user'):
+            is_child = user.is_child_user
+        role_value = getattr(user, 'role', None)
+        if role_value == 'CHILD_USER':
+            is_child = True
+
+        if not is_child:
+            return
+
+        current = getattr(user, 'star_count', 0) or 0
+        new_value = current + delta
+        if new_value < 0:
+            new_value = 0
+
+        if new_value != current:
+            user.star_count = new_value
+            user.save(update_fields=['star_count', 'updated_at'])
+    
     @action(detail=True, methods=['post'], url_path='toggle-complete')
     def toggle_complete(self, request, pk=None):
         """Toggle task completion status"""
@@ -616,8 +642,10 @@ class TaskViewSet(viewsets.ModelViewSet):
         
         if task.completed:
             task.mark_incomplete()
+            self._adjust_star_count(task.assigned_to, -1)
         else:
             task.mark_completed()
+            self._adjust_star_count(task.assigned_to, 1)
         
         serializer = self.get_serializer(task)
         return Response(serializer.data)

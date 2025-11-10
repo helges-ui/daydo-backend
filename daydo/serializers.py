@@ -65,10 +65,10 @@ class UserSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'username', 'email', 'first_name', 'last_name', 
             'role', 'role_display', 'family', 'family_name', 
-            'phone_number', 'avatar', 'color', 'is_active', 'display_name',
+            'phone_number', 'avatar', 'color', 'star_count', 'is_active', 'display_name',
             'created_at', 'password'
         ]
-        read_only_fields = ['id', 'created_at', 'role']
+        read_only_fields = ['id', 'created_at', 'role', 'star_count']
         extra_kwargs = {
             'password': {'write_only': True, 'required': False}
         }

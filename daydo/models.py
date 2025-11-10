@@ -77,6 +77,7 @@ class User(AbstractUser):
         validators=[validate_hex_color],
         help_text="HEX color code (e.g., #FF5733)"
     )
+    star_count = models.PositiveIntegerField(default=0, help_text="Accumulated stars from completed tasks")
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
