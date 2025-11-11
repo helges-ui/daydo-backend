@@ -82,6 +82,11 @@ A Django REST API backend for the DayDo family task management application.
    ```bash
    cp .env.example .env
    ```
+   Configure required environment variables inside `.env`. In addition to database credentials and Django secrets, set a shared Mapbox public token that will be served to all authenticated frontend clients:
+   ```
+   MAPBOX_PUBLIC_TOKEN=pk.your-shared-mapbox-token
+   ```
+   This value is read by the backend (see `MAPBOX_PUBLIC_TOKEN` in `daydo_backend/settings.py`) and should be present in every environment (local, staging, production).
 
 3. **Database Setup**
    - Install PostgreSQL

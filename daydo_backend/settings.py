@@ -221,6 +221,9 @@ AWS_REGION = config('AWS_REGION', default='us-east-1')
 AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID', default='')
 AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY', default='')
 
+# Mapbox configuration
+MAPBOX_PUBLIC_TOKEN = config('MAPBOX_PUBLIC_TOKEN', default='')
+
 # Logging configuration
 LOGGING = {
     'version': 1,
