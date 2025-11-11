@@ -18,6 +18,7 @@ from datetime import timedelta
 from django.http import JsonResponse
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework.exceptions import ValidationError as DRFValidationError
+from django.conf import settings
 
 from .models import (
     User,
@@ -71,6 +72,24 @@ from .permissions import (
     CanSendMessagesPermission, CanViewFamilyCalendarPermission,
     IsOwnerOrParentPermission
 )
+
+
+class MapboxTokenView(APIView):
+    """
+    Returns the shared Mapbox public token configured on the backend.
+    Only accessible to authenticated family members.
+    """
+
+    permission_classes = [IsAuthenticated, FamilyMemberPermission]
+
+    def get(self, request):
+        token = getattr(settings, 'MAPBOX_PUBLIC_TOKEN', '')
+        if not token:
+            return Response(
+                {'detail': 'Mapbox token is not configured on the server.'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        return Response({'token': token}, status=status.HTTP_200_OK)
 
 
 class AuthenticationViewSet(viewsets.ViewSet):

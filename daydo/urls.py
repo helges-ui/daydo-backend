@@ -11,7 +11,7 @@ from .views import (
     AuthenticationViewSet, FamilyViewSet, ChildProfileViewSet,
     ChildUserPermissionsViewSet, UserViewSet, DashboardView, HealthCheckView,
     TaskViewSet, EventViewSet, ShoppingListViewSet, TodoListViewSet, NoteViewSet,
-    LocationViewSet, GeofenceViewSet,
+    LocationViewSet, GeofenceViewSet, MapboxTokenView,
 )
 
 # Create router for ViewSets
@@ -39,6 +39,8 @@ urlpatterns = [
     path('dashboard/', DashboardView.as_view(), name='dashboard'),
     # Health check endpoint
     path('health/', HealthCheckView.as_view(), name='health'),
+    # Mapbox token endpoint
+    path('location/mapbox-token/', MapboxTokenView.as_view(), name='mapbox-token'),
     
     # Include router URLs
     path('', include(router.urls)),
