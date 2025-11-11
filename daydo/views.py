@@ -918,6 +918,7 @@ class LocationViewSet(viewsets.ViewSet):
     """Location sharing endpoints"""
 
     permission_classes = [IsAuthenticated, FamilyMemberPermission]
+    STALE_THRESHOLD_MINUTES = 5
 
     DURATION_MAP = {
         '15m': timedelta(minutes=15),
@@ -1081,6 +1082,7 @@ class LocationViewSet(viewsets.ViewSet):
                 sharing_user=user,
                 latitude=validated['latitude'],
                 longitude=validated['longitude'],
+                accuracy=validated.get('accuracy'),
             )
         else:
             sharing_status.is_sharing_live = is_live
@@ -1131,6 +1133,7 @@ class LocationViewSet(viewsets.ViewSet):
             sharing_user=user,
             latitude=validated['latitude'],
             longitude=validated['longitude'],
+            accuracy=validated.get('accuracy'),
         )
 
         self._enforce_location_limit(user)
@@ -1168,6 +1171,7 @@ class LocationViewSet(viewsets.ViewSet):
         family_members = user.family.members.select_related('sharing_status')
         child_profiles = user.family.child_profiles.select_related('linked_user', 'linked_user__sharing_status')
         geofences = self._get_family_geofences(user.family)
+        stale_threshold = timezone.now() - timedelta(minutes=self.STALE_THRESHOLD_MINUTES)
 
         latest_location_subquery = Location.objects.filter(
             sharing_user=OuterRef('pk')
@@ -1177,6 +1181,7 @@ class LocationViewSet(viewsets.ViewSet):
             latest_latitude=Subquery(latest_location_subquery.values('latitude')[:1]),
             latest_longitude=Subquery(latest_location_subquery.values('longitude')[:1]),
             latest_timestamp=Subquery(latest_location_subquery.values('timestamp')[:1]),
+            latest_accuracy=Subquery(latest_location_subquery.values('accuracy')[:1]),
         )
 
         payload = []
@@ -1211,6 +1216,11 @@ class LocationViewSet(viewsets.ViewSet):
 
             latitude_value = getattr(member, 'latest_latitude', None)
             longitude_value = getattr(member, 'latest_longitude', None)
+            accuracy_value = getattr(member, 'latest_accuracy', None)
+            timestamp_value = getattr(member, 'latest_timestamp', None)
+            is_stale = bool(
+                timestamp_value and timestamp_value < stale_threshold
+            )
             geofence_match = self._match_geofence(latitude_value, longitude_value, geofences)
 
             if geofence_match:
@@ -1219,12 +1229,14 @@ class LocationViewSet(viewsets.ViewSet):
                 within_geofence = True
                 latitude_payload = None
                 longitude_payload = None
+                accuracy_payload = None
             else:
                 location_label = None
                 geofence_id = None
                 within_geofence = False
                 latitude_payload = latitude_value
                 longitude_payload = longitude_value
+                accuracy_payload = accuracy_value
 
             payload.append({
                 'user_id': str(member.id),
@@ -1233,10 +1245,12 @@ class LocationViewSet(viewsets.ViewSet):
                 'user_color': member.color,
                 'latitude': latitude_payload,
                 'longitude': longitude_payload,
-                'timestamp': getattr(member, 'latest_timestamp', None),
+                'timestamp': timestamp_value,
                 'location_label': location_label,
                 'geofence_id': geofence_id,
                 'within_geofence': within_geofence,
+                'accuracy': accuracy_payload,
+                'is_stale': is_stale,
                 'is_sharing_live': is_sharing_live,
                 'sharing_type': sharing_type,
                 'expires_at': expires_at,
@@ -1281,12 +1295,17 @@ class LocationViewSet(viewsets.ViewSet):
                 latitude_value = latest_location.latitude
                 longitude_value = latest_location.longitude
                 timestamp_value = latest_location.timestamp
+                accuracy_value = latest_location.accuracy
             else:
                 latitude_value = None
                 longitude_value = None
                 timestamp_value = None
+                accuracy_value = None
 
             geofence_match = self._match_geofence(latitude_value, longitude_value, geofences)
+            is_stale = bool(
+                timestamp_value and timestamp_value < stale_threshold
+            )
 
             if geofence_match:
                 location_label = geofence_match.name
@@ -1294,12 +1313,14 @@ class LocationViewSet(viewsets.ViewSet):
                 within_geofence = True
                 latitude_payload = None
                 longitude_payload = None
+                accuracy_payload = None
             else:
                 location_label = None
                 geofence_id = None
                 within_geofence = False
                 latitude_payload = latitude_value
                 longitude_payload = longitude_value
+                accuracy_payload = accuracy_value
 
             payload.append({
                 'user_id': str(child.id),
@@ -1312,6 +1333,8 @@ class LocationViewSet(viewsets.ViewSet):
                 'location_label': location_label,
                 'geofence_id': geofence_id,
                 'within_geofence': within_geofence,
+                'accuracy': accuracy_payload,
+                'is_stale': is_stale,
                 'is_sharing_live': is_sharing_live,
                 'sharing_type': sharing_type,
                 'expires_at': expires_at,

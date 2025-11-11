@@ -632,6 +632,12 @@ class LocationSerializer(serializers.ModelSerializer):
 
     sharing_user_name = serializers.CharField(source='sharing_user.get_display_name', read_only=True)
     sharing_user_id = serializers.UUIDField(source='sharing_user.id', read_only=True)
+    accuracy = serializers.DecimalField(
+        max_digits=7,
+        decimal_places=2,
+        required=False,
+        allow_null=True
+    )
 
     class Meta:
         model = Location
@@ -642,6 +648,7 @@ class LocationSerializer(serializers.ModelSerializer):
             'sharing_user_name',
             'latitude',
             'longitude',
+            'accuracy',
             'timestamp',
         ]
         read_only_fields = ['id', 'sharing_user', 'timestamp']
@@ -654,6 +661,11 @@ class LocationSerializer(serializers.ModelSerializer):
     def validate_longitude(self, value):
         if value < -180 or value > 180:
             raise serializers.ValidationError('Longitude must be between -180 and 180 degrees.')
+        return value
+
+    def validate_accuracy(self, value):
+        if value is not None and value < 0:
+            raise serializers.ValidationError('Accuracy must be greater than or equal to 0.')
         return value
 
 
@@ -697,6 +709,8 @@ class FamilyLocationSerializer(serializers.Serializer):
     location_label = serializers.CharField(allow_null=True, required=False)
     geofence_id = serializers.UUIDField(allow_null=True, required=False)
     within_geofence = serializers.BooleanField(default=False)
+    accuracy = serializers.DecimalField(max_digits=7, decimal_places=2, required=False, allow_null=True)
+    is_stale = serializers.BooleanField(default=False)
     is_sharing_live = serializers.BooleanField()
     sharing_type = serializers.CharField(allow_null=True, required=False)
     expires_at = serializers.DateTimeField(allow_null=True, required=False)

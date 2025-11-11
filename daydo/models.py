@@ -582,6 +582,13 @@ class Location(models.Model):
         decimal_places=6,
         help_text="Longitude coordinate (-180 to 180)"
     )
+    accuracy = models.DecimalField(
+        max_digits=7,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Horizontal accuracy in meters"
+    )
     timestamp = models.DateTimeField(
         auto_now_add=True,
         help_text="When this location was recorded"
