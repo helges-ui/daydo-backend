@@ -66,7 +66,6 @@ echo "=========================================="
 echo "Test Complete"
 echo "=========================================="
 echo ""
-echo "⚠️  IMPORTANT: Update the token in AWS Amplify if it's truncated!"
-echo "   Full token: pk.eyJ1IjoiZ2VyZGlnZXJkc2VuIiwiYSI6ImNtaHV5anRidzA0bG0ybXNrNTdoZms1N2kifQ.4e-ng27Yaul9NjzDwCeUfA"
+echo "To update the token, run: ./deploy.sh token"
 echo ""
 
