@@ -8,8 +8,8 @@ from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.db.models import Max
-from .serializers.mixins import CoordinateValidationMixin
-from .models import (
+from .mixins import CoordinateValidationMixin
+from ..models import (
     User,
     Family,
     ChildProfile,
