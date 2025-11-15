@@ -40,6 +40,7 @@ from .models import (
 from .services.auth_service import AuthService
 from .services.dashboard_service import DashboardService
 from .services.location_service import LocationService
+from .services.child_profile_service import ChildProfileService
 from .utils.response_helpers import ResponseHelper
 from .serializers import (
     FamilySerializer,

@@ -1261,12 +1261,12 @@ class LocationViewSet(viewsets.ViewSet):
 8. ⏳ **Test:** Create comprehensive tests for LocationService (pending)
 9. ✅ **Test:** Verify API endpoints still work
 
-#### Step 2.2: Extract Child Profile Service
-1. Create `daydo/services/child_profile_service.py`
-2. Move username generation logic
-3. Extract child profile creation logic
-4. Update views to use service
-5. **Test:** Verify child profile operations
+#### Step 2.2: Extract Child Profile Service ✅ COMPLETE
+1. ✅ Create `daydo/services/child_profile_service.py`
+2. ✅ Move username generation logic (extracted to `generate_username_from_child_profile` and `generate_username_from_name`)
+3. ✅ Extract child profile creation logic (extracted to `create_login_account` method)
+4. ✅ Update views and serializers to use service
+5. ✅ **Test:** Verify child profile operations
 
 #### Step 2.3: Extract Task Service (Optional)
 1. Create `daydo/services/task_service.py`

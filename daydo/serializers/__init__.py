@@ -231,13 +231,12 @@ class ChildProfileCreateSerializer(serializers.ModelSerializer):
         
         # Create login account if requested
         if create_login_account:
-            if not username:
-                username = f"{child_profile.first_name.lower()}_{child_profile.family.name.lower()}"
-            
-            if not password:
-                raise serializers.ValidationError("Password is required when creating login account")
-            
-            child_profile.create_login_account(username=username, password=password)
+            from ..services.child_profile_service import ChildProfileService
+            ChildProfileService.create_login_account(
+                child_profile,
+                username=username,
+                password=password
+            )
         
         return child_profile
 

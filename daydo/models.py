@@ -219,33 +219,12 @@ class ChildProfile(models.Model):
     
     def create_login_account(self, username=None, password=None):
         """
-        Convert CHILD_VIEW to CHILD_USER by creating login account
+        Convert CHILD_VIEW to CHILD_USER by creating login account.
+        
+        This method delegates to ChildProfileService for the actual implementation.
         """
-        if self.has_login_account:
-            raise ValueError("Child already has a login account")
-        
-        if not username:
-            username = f"{self.first_name.lower()}_{self.family.name.lower()}"
-        
-        # Create User account
-        user = User.objects.create_user(
-            username=username,
-            password=password,
-            first_name=self.first_name,
-            last_name=self.last_name,
-            family=self.family,
-            role='CHILD_USER'
-        )
-        
-        # Link to child profile
-        self.linked_user = user
-        self.is_view_only = False
-        self.save()
-        
-        # Create default permissions
-        ChildUserPermissions.create_default_permissions(user)
-        
-        return user
+        from .services.child_profile_service import ChildProfileService
+        return ChildProfileService.create_login_account(self, username=username, password=password)
 
 
 class ChildUserPermissions(models.Model):
