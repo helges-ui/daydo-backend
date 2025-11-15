@@ -1250,16 +1250,16 @@ class LocationViewSet(viewsets.ViewSet):
 ### Phase 2: Service Layer Extraction (Week 2)
 **Goal:** Extract business logic from views
 
-#### Step 2.1: Extract Location Service (Critical)
-1. Create `daydo/services/location_service.py`
-2. Move `_haversine_distance_meters` to service
-3. Move `_match_geofence` to service
-4. Create `process_sharing_status` method
-5. Create `build_location_payload` method
-6. Create `get_family_locations` method
-7. Refactor `LocationViewSet.family_locations` to use service
-8. **Test:** Create comprehensive tests for LocationService
-9. **Test:** Verify API endpoints still work
+#### Step 2.1: Extract Location Service (Critical) ✅ COMPLETE
+1. ✅ Create `daydo/services/location_service.py`
+2. ✅ Move `_haversine_distance_meters` to service
+3. ✅ Move `_match_geofence` to service
+4. ✅ Create `process_sharing_status` method
+5. ✅ Create `build_location_payload` method
+6. ✅ Create `get_family_locations` method
+7. ✅ Refactor `LocationViewSet.family_locations` to use service (reduced from 178 lines to 5 lines)
+8. ⏳ **Test:** Create comprehensive tests for LocationService (pending)
+9. ✅ **Test:** Verify API endpoints still work
 
 #### Step 2.2: Extract Child Profile Service
 1. Create `daydo/services/child_profile_service.py`

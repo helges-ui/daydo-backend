@@ -3,10 +3,8 @@ Views for DayDo API endpoints.
 These views implement the role-based access control and API endpoints
 defined in the product backlog.
 """
-import math
-
 from rest_framework import viewsets, status, permissions
-from django.db.models import Max, Q, OuterRef, Subquery
+from django.db.models import Max, Q
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -41,6 +39,7 @@ from .models import (
 )
 from .services.auth_service import AuthService
 from .services.dashboard_service import DashboardService
+from .services.location_service import LocationService
 from .utils.response_helpers import ResponseHelper
 from .serializers import (
     FamilySerializer,
@@ -925,52 +924,10 @@ class LocationViewSet(viewsets.ViewSet):
             Location.objects.filter(id__in=location_ids).delete()
 
     def _get_family_geofences(self, family):
+        """Get family geofences (kept for legacy endpoints)"""
         return list(
             Geofence.objects.filter(family=family).order_by('name')
         )
-
-    @staticmethod
-    def _haversine_distance_meters(lat1, lon1, lat2, lon2):
-        """
-        Calculate the great-circle distance between two points on the Earth (in meters).
-        """
-        radius = 6371000  # Earth radius in meters
-        phi1 = math.radians(lat1)
-        phi2 = math.radians(lat2)
-        delta_phi = math.radians(lat2 - lat1)
-        delta_lambda = math.radians(lon2 - lon1)
-
-        a = math.sin(delta_phi / 2) ** 2 + \
-            math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
-        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
-        return radius * c
-
-    def _match_geofence(self, latitude, longitude, geofences):
-        """
-        Return the first geofence whose radius contains the provided lat/lon.
-        """
-        if latitude is None or longitude is None:
-            return None
-
-        try:
-            lat = float(latitude)
-            lon = float(longitude)
-        except (TypeError, ValueError):
-            return None
-
-        for geofence in geofences:
-            try:
-                fence_lat = float(geofence.latitude)
-                fence_lon = float(geofence.longitude)
-            except (TypeError, ValueError):
-                continue
-
-            distance = self._haversine_distance_meters(lat, lon, fence_lat, fence_lon)
-            if distance <= geofence.radius:
-                return geofence
-
-        return None
 
     @action(detail=False, methods=['get'], url_path='geofences', url_name='legacy-geofence-list')
     def legacy_list_geofences(self, request):
@@ -1146,181 +1103,9 @@ class LocationViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=['get'], url_path='family')
     def family_locations(self, request):
-        user = request.user
-        family_members = user.family.members.select_related('sharing_status')
-        child_profiles = user.family.child_profiles.select_related('linked_user', 'linked_user__sharing_status')
-        geofences = self._get_family_geofences(user.family)
-        stale_threshold = timezone.now() - timedelta(minutes=self.STALE_THRESHOLD_MINUTES)
-
-        latest_location_subquery = Location.objects.filter(
-            sharing_user=OuterRef('pk')
-        ).order_by('-timestamp')
-
-        annotated_members = family_members.annotate(
-            latest_latitude=Subquery(latest_location_subquery.values('latitude')[:1]),
-            latest_longitude=Subquery(latest_location_subquery.values('longitude')[:1]),
-            latest_timestamp=Subquery(latest_location_subquery.values('timestamp')[:1]),
-            latest_accuracy=Subquery(latest_location_subquery.values('accuracy')[:1]),
-        )
-
-        payload = []
-
-        for member in annotated_members:
-            if member.role == 'CHILD_USER':
-                continue
-
-            sharing_status = getattr(member, 'sharing_status', None)
-
-            is_sharing_live = False
-            sharing_type = None
-            expires_at = None
-            started_at = None
-            updated_at = None
-
-            if sharing_status:
-                if sharing_status.sharing_type == 'temporary' and sharing_status.is_expired():
-                    if sharing_status.is_sharing_live:
-                        sharing_status.is_sharing_live = False
-                        sharing_status.save(update_fields=['is_sharing_live', 'updated_at'])
-                    is_sharing_live = False
-                else:
-                    is_sharing_live = sharing_status.is_sharing_live
-                    sharing_type = sharing_status.sharing_type
-                    expires_at = sharing_status.expires_at
-                    started_at = sharing_status.started_at
-                    updated_at = sharing_status.updated_at
-
-                if sharing_status.sharing_type == 'one-time':
-                    is_sharing_live = False
-
-            latitude_value = getattr(member, 'latest_latitude', None)
-            longitude_value = getattr(member, 'latest_longitude', None)
-            accuracy_value = getattr(member, 'latest_accuracy', None)
-            timestamp_value = getattr(member, 'latest_timestamp', None)
-            is_stale = bool(
-                timestamp_value and timestamp_value < stale_threshold
-            )
-            geofence_match = self._match_geofence(latitude_value, longitude_value, geofences)
-
-            if geofence_match:
-                location_label = geofence_match.name
-                geofence_id = str(geofence_match.id)
-                within_geofence = True
-                latitude_payload = None
-                longitude_payload = None
-                accuracy_payload = None
-            else:
-                location_label = None
-                geofence_id = None
-                within_geofence = False
-                latitude_payload = latitude_value
-                longitude_payload = longitude_value
-                accuracy_payload = accuracy_value
-
-            payload.append({
-                'user_id': str(member.id),
-                'user_name': member.get_display_name(),
-                'user_avatar': member.avatar,
-                'user_color': member.color,
-                'latitude': latitude_payload,
-                'longitude': longitude_payload,
-                'timestamp': timestamp_value,
-                'location_label': location_label,
-                'geofence_id': geofence_id,
-                'within_geofence': within_geofence,
-                'accuracy': accuracy_payload,
-                'is_stale': is_stale,
-                'is_sharing_live': is_sharing_live,
-                'sharing_type': sharing_type,
-                'expires_at': expires_at,
-                'started_at': started_at,
-                'updated_at': updated_at,
-            })
-
-        for child in child_profiles:
-            linked_user = child.linked_user
-            latest_location = None
-            is_sharing_live = False
-            sharing_type = None
-            expires_at = None
-            started_at = None
-            updated_at = None
-
-            if linked_user:
-                latest_location = (
-                    Location.objects.filter(sharing_user=linked_user)
-                    .order_by('-timestamp')
-                    .first()
-                )
-                sharing_status = getattr(linked_user, 'sharing_status', None)
-
-                if sharing_status:
-                    if sharing_status.sharing_type == 'temporary' and sharing_status.is_expired():
-                        if sharing_status.is_sharing_live:
-                            sharing_status.is_sharing_live = False
-                            sharing_status.save(update_fields=['is_sharing_live', 'updated_at'])
-                        is_sharing_live = False
-                    else:
-                        is_sharing_live = sharing_status.is_sharing_live
-                        sharing_type = sharing_status.sharing_type
-                        expires_at = sharing_status.expires_at
-                        started_at = sharing_status.started_at
-                        updated_at = sharing_status.updated_at
-
-                    if sharing_status.sharing_type == 'one-time':
-                        is_sharing_live = False
-
-            if latest_location:
-                latitude_value = latest_location.latitude
-                longitude_value = latest_location.longitude
-                timestamp_value = latest_location.timestamp
-                accuracy_value = latest_location.accuracy
-            else:
-                latitude_value = None
-                longitude_value = None
-                timestamp_value = None
-                accuracy_value = None
-
-            geofence_match = self._match_geofence(latitude_value, longitude_value, geofences)
-            is_stale = bool(
-                timestamp_value and timestamp_value < stale_threshold
-            )
-
-            if geofence_match:
-                location_label = geofence_match.name
-                geofence_id = str(geofence_match.id)
-                within_geofence = True
-                latitude_payload = None
-                longitude_payload = None
-                accuracy_payload = None
-            else:
-                location_label = None
-                geofence_id = None
-                within_geofence = False
-                latitude_payload = latitude_value
-                longitude_payload = longitude_value
-                accuracy_payload = accuracy_value
-
-            payload.append({
-                'user_id': str(child.id),
-                'user_name': child.full_name or child.first_name,
-                'user_avatar': child.avatar,
-                'user_color': child.color,
-                'latitude': latitude_payload,
-                'longitude': longitude_payload,
-                'timestamp': timestamp_value,
-                'location_label': location_label,
-                'geofence_id': geofence_id,
-                'within_geofence': within_geofence,
-                'accuracy': accuracy_payload,
-                'is_stale': is_stale,
-                'is_sharing_live': is_sharing_live,
-                'sharing_type': sharing_type,
-                'expires_at': expires_at,
-                'started_at': started_at,
-                'updated_at': updated_at,
-            })
-
+        """Get all family locations"""
+        family = request.user.family
+        payload = LocationService.get_family_locations(family)
         serializer = FamilyLocationSerializer(payload, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
