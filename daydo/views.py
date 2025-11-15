@@ -3,12 +3,14 @@ Views for DayDo API endpoints.
 These views implement the role-based access control and API endpoints
 defined in the product backlog.
 """
+from typing import Optional, Dict, Any
 from rest_framework import viewsets, status, permissions
 from django.db.models import Max, Q
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.request import Request
 from django.shortcuts import get_object_or_404
 from django.contrib.auth import authenticate
 from django.utils import timezone
@@ -84,7 +86,8 @@ class MapboxTokenView(APIView):
 
     permission_classes = [IsAuthenticated, FamilyMemberPermission]
 
-    def get(self, request):
+    def get(self, request: Request) -> Response:
+        """Get Mapbox public token"""
         token = getattr(settings, 'MAPBOX_PUBLIC_TOKEN', '')
         if not token:
             return ResponseHelper.service_unavailable_response(
@@ -291,27 +294,29 @@ class ChildProfileViewSet(viewsets.ModelViewSet):
         DashboardService.invalidate_cache(self.request.user.family.id, self.request.user.id)
     
     @action(detail=True, methods=['post'])
-    def create_login_account(self, request, pk=None):
+    def create_login_account(self, request: Request, pk: Optional[str] = None) -> Response:
         """Convert CHILD_VIEW to CHILD_USER by creating login account"""
         child_profile = self.get_object()
         
         if child_profile.has_login_account:
-            return Response(
-                {'error': 'Child already has a login account'}, 
-                status=status.HTTP_400_BAD_REQUEST
+            return ResponseHelper.bad_request_response(
+                'Child already has a login account'
             )
         
         username = request.data.get('username')
         password = request.data.get('password')
         
         if not password:
-            return Response(
-                {'error': 'Password is required'}, 
-                status=status.HTTP_400_BAD_REQUEST
+            return ResponseHelper.bad_request_response(
+                'Password is required'
             )
         
         try:
-            user = child_profile.create_login_account(username=username, password=password)
+            user = ChildProfileService.create_login_account(
+                child_profile,
+                username=username,
+                password=password
+            )
             # Invalidate dashboard cache when a login account is created
             DashboardService.invalidate_cache(request.user.family.id, request.user.id)
             return Response({
@@ -319,10 +324,7 @@ class ChildProfileViewSet(viewsets.ModelViewSet):
                 'user': UserSerializer(user).data
             }, status=status.HTTP_201_CREATED)
         except ValueError as e:
-            return Response(
-                {'error': str(e)}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return ResponseHelper.bad_request_response(str(e))
     
     @action(detail=True, methods=['delete'])
     def remove_login_account(self, request, pk=None):
@@ -609,7 +611,7 @@ class TaskViewSet(viewsets.ModelViewSet):
         )
     
     @action(detail=True, methods=['post'], url_path='toggle-complete')
-    def toggle_complete(self, request, pk=None):
+    def toggle_complete(self, request: Request, pk: Optional[str] = None) -> Response:
         """Toggle task completion status"""
         task = self.get_object()
         
@@ -900,18 +902,22 @@ class LocationViewSet(viewsets.ViewSet):
         )
 
     @action(detail=False, methods=['get'], url_path='geofences', url_name='legacy-geofence-list')
-    def legacy_list_geofences(self, request):
+    def legacy_list_geofences(self, request: Request) -> Response:
         """
         Backward compatibility endpoint for legacy clients still calling /api/location/geofences/.
+        
+        DEPRECATED: Use /api/geofences/ instead.
         """
         geofences = Geofence.objects.filter(family=request.user.family).order_by('name')
         serializer = GeofenceSerializer(geofences, many=True, context={'request': request})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @legacy_list_geofences.mapping.post
-    def legacy_create_geofence(self, request):
+    def legacy_create_geofence(self, request: Request) -> Response:
         """
         Backward compatibility endpoint for creating a geofence via /api/location/geofences/.
+        
+        DEPRECATED: Use POST /api/geofences/ instead.
         """
         if not request.user.is_parent:
             return ResponseHelper.forbidden_response(
@@ -923,9 +929,11 @@ class LocationViewSet(viewsets.ViewSet):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=['delete'], url_path=r'geofences/(?P<geofence_id>[^/.]+)', url_name='legacy-geofence-delete')
-    def legacy_delete_geofence(self, request, geofence_id=None):
+    def legacy_delete_geofence(self, request: Request, geofence_id: Optional[str] = None) -> Response:
         """
         Backward compatibility endpoint for deleting a geofence via /api/location/geofences/<id>/.
+        
+        DEPRECATED: Use DELETE /api/geofences/<id>/ instead.
         """
         if not request.user.is_parent:
             return ResponseHelper.forbidden_response(
@@ -962,7 +970,7 @@ class LocationViewSet(viewsets.ViewSet):
         return serializer.validated_data
 
     @action(detail=False, methods=['post'], url_path='share')
-    def share(self, request):
+    def share(self, request: Request) -> Response:
         user = request.user
         sharing_status = self._get_or_create_sharing_status(user)
 
@@ -1009,7 +1017,7 @@ class LocationViewSet(viewsets.ViewSet):
         return Response(response_data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['post'], url_path='update')
-    def update_location(self, request):
+    def update_location(self, request: Request) -> Response:
         user = request.user
         sharing_status = getattr(user, 'sharing_status', None)
 
@@ -1050,7 +1058,7 @@ class LocationViewSet(viewsets.ViewSet):
         )
 
     @action(detail=False, methods=['post'], url_path='stop')
-    def stop_sharing(self, request):
+    def stop_sharing(self, request: Request) -> Response:
         user = request.user
         sharing_status = getattr(user, 'sharing_status', None)
 
@@ -1061,7 +1069,7 @@ class LocationViewSet(viewsets.ViewSet):
             return Response(
                 {'message': 'Location sharing already stopped.'},
                 status=status.HTTP_200_OK,
-            )
+            )  # Note: This is a success message, not an error, so Response is appropriate
 
         sharing_status.is_sharing_live = False
         sharing_status.save(update_fields=['is_sharing_live', 'updated_at'])
@@ -1072,7 +1080,7 @@ class LocationViewSet(viewsets.ViewSet):
         )
 
     @action(detail=False, methods=['get'], url_path='family')
-    def family_locations(self, request):
+    def family_locations(self, request: Request) -> Response:
         """Get all family locations"""
         family = request.user.family
         payload = LocationService.get_family_locations(family)
