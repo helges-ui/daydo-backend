@@ -30,6 +30,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework_simplejwt',
     'corsheaders',
+    'channels',
     
     # Local apps
     'daydo',
@@ -65,6 +66,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'daydo_backend.wsgi.application'
+ASGI_APPLICATION = 'daydo_backend.asgi.application'
 
 # Custom User Model
 AUTH_USER_MODEL = 'daydo.User'

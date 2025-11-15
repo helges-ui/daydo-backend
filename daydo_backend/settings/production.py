@@ -13,6 +13,7 @@ from .cache import *
 from .email import *
 from .aws import *
 from .mapbox import *
+from .redis import *  # Add this line to import Redis/Channels configuration
 
 # Override JWT signing key
 SIMPLE_JWT['SIGNING_KEY'] = SECRET_KEY

@@ -696,3 +696,7 @@ class FamilyLocationSerializer(serializers.Serializer):
     expires_at = serializers.DateTimeField(allow_null=True, required=False)
     started_at = serializers.DateTimeField(allow_null=True, required=False)
     updated_at = serializers.DateTimeField(allow_null=True, required=False)
+
+
+# Import chat serializers
+from .chat import MessageSerializer, ConversationSerializer

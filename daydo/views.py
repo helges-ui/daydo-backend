@@ -21,6 +21,9 @@ from rest_framework.exceptions import ValidationError as DRFValidationError
 from django.conf import settings
 
 from .models import (
+    Conversation,
+    Message,
+    MessageReadStatus,
     User,
     Family,
     ChildProfile,
@@ -46,6 +49,8 @@ from .services.child_profile_service import ChildProfileService
 from .services.task_service import TaskService
 from .utils.response_helpers import ResponseHelper
 from .serializers import (
+    ConversationSerializer,
+    MessageSerializer,
     FamilySerializer,
     UserSerializer,
     UserRegistrationSerializer,
@@ -1157,6 +1162,139 @@ class NoteViewSet(viewsets.ModelViewSet):
         
         return super().destroy(request, *args, **kwargs)
 
+    def get_serializer_context(self):
+        """Add request to serializer context"""
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+
+
+class ConversationViewSet(viewsets.ModelViewSet):
+    """Conversation management endpoints"""
+    serializer_class = ConversationSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        """Return conversations for the current user"""
+        user = self.request.user
+        return Conversation.objects.filter(participants=user).order_by('-last_message_at')
+    
+    @action(detail=False, methods=['post'])
+    def get_or_create_family_chat(self, request):
+        """Get or create the main family chat"""
+        family = request.user.family
+        conversation, created = Conversation.objects.get_or_create(
+            family=family,
+            conversation_type='family',
+            defaults={}
+        )
+        # Ensure all family members are participants
+        family_members = family.members.all()
+        conversation.participants.set(family_members)
+        
+        serializer = self.get_serializer(conversation, context={'request': request})
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['post'])
+    def get_or_create_direct_message(self, request):
+        """Get or create a direct message conversation"""
+        participant_id = request.data.get('participant_id')
+        if not participant_id:
+            return ResponseHelper.bad_request_response("participant_id is required")
+        
+        try:
+            other_user = User.objects.get(id=participant_id)
+        except User.DoesNotExist:
+            return ResponseHelper.not_found_response("User not found")
+        
+        # Check if conversation already exists
+        existing = Conversation.objects.filter(
+            conversation_type='direct',
+            participants=request.user
+        ).filter(participants=other_user).distinct().first()
+        
+        if existing:
+            serializer = self.get_serializer(existing, context={'request': request})
+            return Response(serializer.data)
+        
+        # Create new conversation
+        conversation = Conversation.objects.create(
+            family=request.user.family,
+            conversation_type='direct'
+        )
+        conversation.participants.set([request.user, other_user])
+        
+        serializer = self.get_serializer(conversation, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    
+    @action(detail=True, methods=['get'])
+    def messages(self, request, pk=None):
+        """Get messages for a conversation"""
+        conversation = self.get_object()
+        messages = Message.objects.filter(conversation=conversation).order_by('created_at')
+        
+        page = self.paginate_queryset(messages)
+        if page is not None:
+            serializer = MessageSerializer(page, many=True, context={'request': request})
+            return self.get_paginated_response(serializer.data)
+        
+        serializer = MessageSerializer(messages, many=True, context={'request': request})
+        return Response(serializer.data)
+    
+    @action(detail=True, methods=['post'])
+    def mark_read(self, request, pk=None):
+        """Mark messages as read"""
+        conversation = self.get_object()
+        message_ids = request.data.get('message_ids', [])
+        
+        if message_ids:
+            messages = Message.objects.filter(
+                id__in=message_ids,
+                conversation=conversation
+            )
+        else:
+            # Mark all messages in conversation as read
+            messages = Message.objects.filter(conversation=conversation)
+        
+        for message in messages:
+            MessageReadStatus.objects.get_or_create(
+                message=message,
+                user=request.user
+            )
+        
+        return Response({'status': 'marked as read'})
+    
+    def get_serializer_context(self):
+        """Add request to serializer context"""
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+
+
+class MessageViewSet(viewsets.ModelViewSet):
+    """Message management endpoints"""
+    serializer_class = MessageSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        """Return messages filtered by conversation"""
+        conversation_id = self.request.query_params.get('conversation_id')
+        if conversation_id:
+            # Verify user has access to this conversation
+            user = self.request.user
+            try:
+                conversation = Conversation.objects.get(id=conversation_id)
+                if user not in conversation.participants.all():
+                    return Message.objects.none()
+                return Message.objects.filter(conversation_id=conversation_id).order_by('created_at')
+            except Conversation.DoesNotExist:
+                return Message.objects.none()
+        return Message.objects.none()
+    
+    def perform_create(self, serializer):
+        """Create message with sender from request"""
+        serializer.save(sender=self.request.user)
+    
     def get_serializer_context(self):
         """Add request to serializer context"""
         context = super().get_serializer_context()

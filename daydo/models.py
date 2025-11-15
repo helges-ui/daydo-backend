@@ -1,6 +1,6 @@
 import uuid
 import re
-from django.contrib.auth.models import AbstractUser
+from django.contrib.auth.models import AbstractUser, UserManager as DjangoUserManager
 from django.db import models
 from django.db.models import QuerySet, Manager
 from django.core.validators import RegexValidator
@@ -73,7 +73,7 @@ class UserQuerySet(QuerySet):
         return self.filter(is_active=True)
 
 
-class UserManager(Manager):
+class UserManager(DjangoUserManager):
     """Custom manager for User model"""
     
     def get_queryset(self):
