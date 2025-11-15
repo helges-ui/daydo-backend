@@ -799,3 +799,94 @@ class Note(models.Model):
     def __str__(self):
         share_status = "Shared" if self.is_shared else "Personal"
         return f"{self.title} ({share_status})"
+
+
+class Conversation(models.Model):
+    """Represents a chat conversation"""
+    CONVERSATION_TYPES = [
+        ('family', 'Family Chat'),
+        ('direct', 'Direct Message'),
+    ]
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    conversation_type = models.CharField(max_length=10, choices=CONVERSATION_TYPES)
+    family = models.ForeignKey(Family, on_delete=models.CASCADE, related_name='conversations')
+    participants = models.ManyToManyField(User, related_name='conversations')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    last_message_at = models.DateTimeField(null=True, blank=True)
+    
+    class Meta:
+        ordering = ['-last_message_at']
+        indexes = [
+            models.Index(fields=['family', 'conversation_type']),
+            models.Index(fields=['-last_message_at']),
+        ]
+    
+    def __str__(self):
+        return f"{self.get_conversation_type_display()} - {self.family.name}"
+
+
+class Message(models.Model):
+    """Represents a chat message"""
+    MESSAGE_TYPES = [
+        ('text', 'Text'),
+        ('image', 'Image'),
+        ('system', 'System'),
+    ]
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name='messages')
+    sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sent_messages')
+    content = models.TextField()
+    message_type = models.CharField(max_length=20, default='text', choices=MESSAGE_TYPES)
+    image_url = models.URLField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    is_edited = models.BooleanField(default=False)
+    
+    class Meta:
+        ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['conversation', '-created_at']),
+            models.Index(fields=['sender', '-created_at']),
+        ]
+    
+    def __str__(self):
+        return f"{self.sender.get_display_name()}: {self.content[:50]}"
+
+
+class MessageReaction(models.Model):
+    """Represents an emoji reaction to a message"""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name='reactions')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='message_reactions')
+    emoji = models.CharField(max_length=10)  # Unicode emoji
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        unique_together = [['message', 'user', 'emoji']]
+        indexes = [
+            models.Index(fields=['message', 'user']),
+        ]
+    
+    def __str__(self):
+        return f"{self.user.get_display_name()} reacted {self.emoji} to message"
+
+
+class MessageReadStatus(models.Model):
+    """Tracks read status of messages"""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name='read_statuses')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='read_messages')
+    read_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        unique_together = [['message', 'user']]
+        indexes = [
+            models.Index(fields=['message', 'user']),
+            models.Index(fields=['user', '-read_at']),
+        ]
+    
+    def __str__(self):
+        return f"{self.user.get_display_name()} read message at {self.read_at}"
