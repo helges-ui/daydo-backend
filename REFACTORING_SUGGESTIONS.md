@@ -1268,11 +1268,11 @@ class LocationViewSet(viewsets.ViewSet):
 4. ✅ Update views and serializers to use service
 5. ✅ **Test:** Verify child profile operations
 
-#### Step 2.3: Extract Task Service (Optional)
-1. Create `daydo/services/task_service.py`
-2. Move star count adjustment logic
-3. Extract task assignment logic
-4. **Test:** Verify task operations
+#### Step 2.3: Extract Task Service ✅ COMPLETE
+1. ✅ Create `daydo/services/task_service.py`
+2. ✅ Move star count adjustment logic (extracted to `adjust_star_count` method)
+3. ✅ Extract task completion logic (extracted to `toggle_task_completion` method)
+4. ✅ **Test:** Verify task operations
 
 ### Phase 3: View Refactoring (Week 3)
 **Goal:** Simplify views by using services
