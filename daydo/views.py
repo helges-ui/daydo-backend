@@ -382,7 +382,7 @@ class UserViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         """Return users in the same family"""
         # Optimize queries: select_related for foreign keys, prefetch_related for reverse relations
-        return User.objects.filter(
+        return User.objects.active().filter(
             family=self.request.user.family
         ).select_related('family').prefetch_related('childuserpermissions')
     
@@ -480,9 +480,8 @@ class UserViewSet(viewsets.ModelViewSet):
         
         # Check if deleting last parent in family
         if instance.is_parent:
-            family_parents = User.objects.filter(
-                family=instance.family,
-                user_role__role__key='PARENT'
+            family_parents = User.objects.parents().filter(
+                family=instance.family
             ).exclude(id=instance.id)
             
             if not family_parents.exists():

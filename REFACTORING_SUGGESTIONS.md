@@ -1293,21 +1293,21 @@ class LocationViewSet(viewsets.ViewSet):
 ### Phase 4: Model Improvements (Week 4)
 **Goal:** Improve models and add managers
 
-#### Step 4.1: Extract Role Checking Logic
-1. Create `_get_role_key` helper method in User model
-2. Simplify `is_parent` and `is_child_user` properties
-3. **Test:** Verify role checking still works
+#### Step 4.1: Extract Role Checking Logic ✅ COMPLETE
+1. ✅ Create `_get_role_key` helper method in User model
+2. ✅ Simplify `is_parent` and `is_child_user` properties (now use `_get_role_key`)
+3. ✅ **Test:** Verify role checking still works (all tests passing)
 
-#### Step 4.2: Add Model Managers
-1. Create `UserManager` with custom querysets
-2. Add `parents()`, `children()`, `active()` methods
-3. Update views to use managers
-4. **Test:** Verify queries are optimized
+#### Step 4.2: Add Model Managers ✅ COMPLETE
+1. ✅ Create `UserManager` with custom querysets (`UserQuerySet` and `UserManager`)
+2. ✅ Add `parents()`, `children()`, `active()` methods
+3. ✅ Update views to use managers (`UserViewSet.get_queryset` and `FamilyViewSet.delete` use managers)
+4. ✅ **Test:** Verify queries are optimized (all tests passing)
 
-#### Step 4.3: Split create_login_account
-1. Break down into smaller private methods
-2. Use `UsernameGenerator` service
-3. **Test:** Verify child account creation
+#### Step 4.3: Split create_login_account ✅ COMPLETE
+1. ✅ Break down into smaller private methods (`_validate_login_account_creation`, `_create_user_account`, `_link_profile_to_user`)
+2. ✅ Use `UsernameGenerator` service (already using `generate_username_from_child_profile`)
+3. ✅ **Test:** Verify child account creation (all tests passing)
 
 ### Phase 5: Settings Refactoring (Week 5)
 **Goal:** Organize settings into modules

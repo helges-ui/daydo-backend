@@ -2,6 +2,7 @@ import uuid
 import re
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+from django.db.models import QuerySet, Manager
 from django.core.validators import RegexValidator
 from django.core.exceptions import ValidationError
 from django.utils import timezone
@@ -50,6 +51,47 @@ class Role(models.Model):
         return self.key
 
 
+class UserQuerySet(QuerySet):
+    """Custom queryset for User model with common filters"""
+    
+    def parents(self):
+        """Return only parent users"""
+        return self.filter(
+            models.Q(user_role__role__key__in=('PARENT', 'PARENT_USER', 'PARENT_ROLE')) |
+            models.Q(role='PARENT')
+        )
+    
+    def children(self):
+        """Return only child users"""
+        return self.filter(
+            models.Q(user_role__role__key__in=('CHILD', 'CHILD_USER')) |
+            models.Q(role='CHILD_USER')
+        )
+    
+    def active(self):
+        """Return only active users"""
+        return self.filter(is_active=True)
+
+
+class UserManager(Manager):
+    """Custom manager for User model"""
+    
+    def get_queryset(self):
+        return UserQuerySet(self.model, using=self._db)
+    
+    def parents(self):
+        """Return only parent users"""
+        return self.get_queryset().parents()
+    
+    def children(self):
+        """Return only child users"""
+        return self.get_queryset().children()
+    
+    def active(self):
+        """Return only active users"""
+        return self.get_queryset().active()
+
+
 class User(AbstractUser):
     """
     Custom User model extending Django's AbstractUser to handle authentication
@@ -59,6 +101,8 @@ class User(AbstractUser):
         ('PARENT', 'Parent'),
         ('CHILD_USER', 'Child User'),
     ]
+    
+    objects = UserManager()
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     family = models.ForeignKey(Family, on_delete=models.CASCADE, related_name='members')
@@ -101,21 +145,27 @@ class User(AbstractUser):
         if self.is_parent and not self.email:
             raise ValidationError("Parent users must have an email.")
     
+    def _get_role_key(self):
+        """
+        Get the role key for this user.
+        Returns the role key from UserRole relation if present, otherwise from deprecated role field.
+        """
+        user_role = getattr(self, 'user_role', None)
+        if user_role and user_role.role:
+            return user_role.role.key
+        return self.role
+    
     @property
     def is_parent(self):
         """Check if user is a parent (via user role relation if present)."""
-        rk = getattr(self, 'user_role', None)
-        if rk and rk.role:
-            return rk.role.key in ('PARENT', 'PARENT_USER', 'PARENT_ROLE') or rk.role.key == 'PARENT'
-        return self.role == 'PARENT'
+        role_key = self._get_role_key()
+        return role_key in ('PARENT', 'PARENT_USER', 'PARENT_ROLE')
     
     @property
     def is_child_user(self):
         """Check if user is a child user (via user role relation if present)."""
-        rk = getattr(self, 'user_role', None)
-        if rk and rk.role:
-            return rk.role.key in ('CHILD', 'CHILD_USER')
-        return False
+        role_key = self._get_role_key()
+        return role_key in ('CHILD', 'CHILD_USER')
     
     def can_manage_family(self):
         """Check if user can manage family settings"""
