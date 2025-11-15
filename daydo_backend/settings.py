@@ -157,6 +157,7 @@ REST_FRAMEWORK = {
     'DEFAULT_PARSER_CLASSES': [
         'rest_framework.parsers.JSONParser',
     ],
+    'EXCEPTION_HANDLER': 'daydo.exceptions.handlers.daydo_exception_handler',
 }
 
 # JWT Settings
