@@ -41,6 +41,7 @@ from .models import (
 )
 from .services.auth_service import AuthService
 from .services.dashboard_service import DashboardService
+from .utils.response_helpers import ResponseHelper
 from .serializers import (
     FamilySerializer,
     UserSerializer,
@@ -85,9 +86,8 @@ class MapboxTokenView(APIView):
     def get(self, request):
         token = getattr(settings, 'MAPBOX_PUBLIC_TOKEN', '')
         if not token:
-            return Response(
-                {'detail': 'Mapbox token is not configured on the server.'},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            return ResponseHelper.service_unavailable_response(
+                'Mapbox token is not configured on the server.'
             )
         return Response({'token': token}, status=status.HTTP_200_OK)
 
@@ -116,14 +116,12 @@ class AuthenticationViewSet(viewsets.ViewSet):
                 try:
                     family = Family.objects.get(id=family_id)
                 except Family.DoesNotExist:
-                    return Response(
-                        {'error': 'Invalid invite link. Family not found.'},
-                        status=status.HTTP_400_BAD_REQUEST
+                    return ResponseHelper.bad_request_response(
+                        'Invalid invite link. Family not found.'
                     )
             except Exception as e:
-                return Response(
-                    {'error': 'Invalid invite link token.'},
-                    status=status.HTTP_400_BAD_REQUEST
+                return ResponseHelper.bad_request_response(
+                    'Invalid invite link token.'
                 )
         
         serializer = UserRegistrationSerializer(data=request.data, context={'request': request, 'family_id': family_id})
@@ -180,9 +178,8 @@ class FamilyViewSet(viewsets.ModelViewSet):
     def generate_invite_link(self, request):
         """Generate an invite link for the user's family"""
         if not request.user.is_parent:
-            return Response(
-                {'error': 'Only parents can generate invite links.'},
-                status=status.HTTP_403_FORBIDDEN
+            return ResponseHelper.forbidden_response(
+                'Only parents can generate invite links.'
             )
         
         family = request.user.family
@@ -240,10 +237,7 @@ class FamilyViewSet(viewsets.ModelViewSet):
         """Get current user's family info"""
         family = request.user.family
         if not family:
-            return Response(
-                {'error': 'User has no family assigned'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return ResponseHelper.not_found_response('Family')
         serializer = FamilySerializer(family)
         return Response(serializer.data)
     
@@ -260,10 +254,7 @@ class FamilyViewSet(viewsets.ModelViewSet):
         )
         
         if dashboard_data is None:
-            return Response(
-                {'error': 'Family not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return ResponseHelper.not_found_response('Family')
         
         serializer = DashboardSerializer(dashboard_data)
         return Response(serializer.data)
@@ -447,9 +438,8 @@ class UserViewSet(viewsets.ModelViewSet):
         # Ensure user can only update own profile or parent can update any child
         instance = self.get_object()
         if not (request.user == instance or (request.user.is_parent and instance.is_child_user)):
-            return Response(
-                {'error': 'You do not have permission to update this user.'},
-                status=status.HTTP_403_FORBIDDEN
+            return ResponseHelper.forbidden_response(
+                'You do not have permission to update this user.'
             )
         
         return super().update(request, *args, **kwargs)
@@ -463,9 +453,8 @@ class UserViewSet(viewsets.ModelViewSet):
         # Ensure user can only update own profile or parent can update any child
         instance = self.get_object()
         if not (request.user == instance or (request.user.is_parent and instance.is_child_user)):
-            return Response(
-                {'error': 'You do not have permission to update this user.'},
-                status=status.HTTP_403_FORBIDDEN
+            return ResponseHelper.forbidden_response(
+                'You do not have permission to update this user.'
             )
         
         return super().partial_update(request, *args, **kwargs)
@@ -476,16 +465,14 @@ class UserViewSet(viewsets.ModelViewSet):
         
         # Only parents can delete users
         if not request.user.is_parent:
-            return Response(
-                {'error': 'Only parents can delete users.'},
-                status=status.HTTP_403_FORBIDDEN
+            return ResponseHelper.forbidden_response(
+                'Only parents can delete users.'
             )
         
         # Cannot delete yourself
         if request.user == instance:
-            return Response(
-                {'error': 'You cannot delete your own account.'},
-                status=status.HTTP_400_BAD_REQUEST
+            return ResponseHelper.bad_request_response(
+                'You cannot delete your own account.'
             )
         
         # Check if deleting last parent in family
@@ -496,9 +483,8 @@ class UserViewSet(viewsets.ModelViewSet):
             ).exclude(id=instance.id)
             
             if not family_parents.exists():
-                return Response(
-                    {'error': 'Cannot delete the last parent in the family.'},
-                    status=status.HTTP_400_BAD_REQUEST
+                return ResponseHelper.bad_request_response(
+                    'Cannot delete the last parent in the family.'
                 )
         
         # UserRole will be cascade deleted automatically
@@ -907,9 +893,8 @@ class GeofenceViewSet(viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         if not request.user.is_parent:
-            return Response(
-                {'error': 'Only parents can delete geofences.'},
-                status=status.HTTP_403_FORBIDDEN,
+            return ResponseHelper.forbidden_response(
+                'Only parents can delete geofences.'
             )
         return super().destroy(request, *args, **kwargs)
 
@@ -1002,9 +987,8 @@ class LocationViewSet(viewsets.ViewSet):
         Backward compatibility endpoint for creating a geofence via /api/location/geofences/.
         """
         if not request.user.is_parent:
-            return Response(
-                {'error': 'Only parents can create geofences.'},
-                status=status.HTTP_403_FORBIDDEN,
+            return ResponseHelper.forbidden_response(
+                'Only parents can create geofences.'
             )
         serializer = GeofenceSerializer(data=request.data, context={'request': request})
         serializer.is_valid(raise_exception=True)
@@ -1017,9 +1001,8 @@ class LocationViewSet(viewsets.ViewSet):
         Backward compatibility endpoint for deleting a geofence via /api/location/geofences/<id>/.
         """
         if not request.user.is_parent:
-            return Response(
-                {'error': 'Only parents can delete geofences.'},
-                status=status.HTTP_403_FORBIDDEN,
+            return ResponseHelper.forbidden_response(
+                'Only parents can delete geofences.'
             )
         geofence = get_object_or_404(
             Geofence,
@@ -1060,9 +1043,8 @@ class LocationViewSet(viewsets.ViewSet):
         sharing_type, expires_at, is_live = self._parse_duration(duration)
 
         if not sharing_type:
-            return Response(
-                {'error': 'Invalid duration. Use one of: 15m, 1h, 1d, always, one-time.'},
-                status=status.HTTP_400_BAD_REQUEST,
+            return ResponseHelper.bad_request_response(
+                'Invalid duration. Use one of: 15m, 1h, 1d, always, one-time.'
             )
 
         created_location = None
@@ -1105,23 +1087,20 @@ class LocationViewSet(viewsets.ViewSet):
         sharing_status = getattr(user, 'sharing_status', None)
 
         if not sharing_status or not sharing_status.is_sharing_live:
-            return Response(
-                {'error': 'Location sharing is not active for this user.'},
-                status=status.HTTP_400_BAD_REQUEST,
+            return ResponseHelper.bad_request_response(
+                'Location sharing is not active for this user.'
             )
 
         if sharing_status.sharing_type == 'temporary' and sharing_status.is_expired():
             sharing_status.is_sharing_live = False
             sharing_status.save(update_fields=['is_sharing_live', 'updated_at'])
-            return Response(
-                {'error': 'Location sharing session has expired.'},
-                status=status.HTTP_400_BAD_REQUEST,
+            return ResponseHelper.bad_request_response(
+                'Location sharing session has expired.'
             )
 
         if sharing_status.sharing_type == 'one-time':
-            return Response(
-                {'error': 'Cannot push updates for one-time sharing sessions.'},
-                status=status.HTTP_400_BAD_REQUEST,
+            return ResponseHelper.bad_request_response(
+                'Cannot push updates for one-time sharing sessions.'
             )
 
         try:
@@ -1410,9 +1389,8 @@ class NoteViewSet(viewsets.ModelViewSet):
         
         # Check permissions: creator can delete own note, parents can delete any note
         if instance.created_by != request.user and not request.user.is_parent:
-            return Response(
-                {'error': 'You can only delete your own notes.'},
-                status=status.HTTP_403_FORBIDDEN
+            return ResponseHelper.forbidden_response(
+                'You can only delete your own notes.'
             )
         
         return super().destroy(request, *args, **kwargs)
